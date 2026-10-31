@@ -53,6 +53,8 @@ jobs:
         include:
           - name: gateway
             image: mahasamuha/samu-gateway
+            context: gateway
+            dockerfile: gateway/Dockerfile
             # Placeholders only: enough for the server to start and answer /healthz.
             smoke_env: >-
               -e ISSUER_URL=https://issuer.invalid/
@@ -62,6 +64,9 @@ jobs:
               -e UPSTREAM_VIRTUAL_KEY=smoke
           - name: mcp
             image: mahasamuha/samu-mcp
+            # Repo root, so the image can include capabilities/ and skills/.
+            context: .
+            dockerfile: mcp/Dockerfile
             smoke_env: -e BRAVE_API_KEY=smoke
 
     steps:
@@ -89,7 +94,8 @@ jobs:
       # Build into the local daemon first so the image is smoke-tested before anything is pushed.
       - uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
-          context: ${{ matrix.name }}
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           platforms: linux/amd64
           load: true
           push: false
@@ -112,7 +118,8 @@ jobs:
 
       - uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
-          context: ${{ matrix.name }}
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

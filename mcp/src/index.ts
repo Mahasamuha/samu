@@ -3,11 +3,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import { search } from "./brave.js";
+import { buildIndex, loadCatalog } from "./capabilities.js";
 import { loadConfig } from "./config.js";
 import { musicFind } from "./plex.js";
 import { weather } from "./weather.js";
 
 const config = loadConfig();
+const catalog = loadCatalog();
 
 function log(event: string, fields: Record<string, unknown> = {}): void {
   console.log(JSON.stringify({ time: new Date().toISOString(), event, ...fields }));
@@ -85,6 +87,14 @@ function buildServer(): McpServer {
       },
     );
   }
+
+  // After the tools: the index reflects what this server instance registered.
+  server.registerResource(
+    "capability-index",
+    "capability://index",
+    { title: "Capability index", description: "Capabilities, tool definitions and skills this server offers.", mimeType: "application/json" },
+    async (uri) => ({ contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(await buildIndex(catalog, server)) }] }),
+  );
 
   return server;
 }
