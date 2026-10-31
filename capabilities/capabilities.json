@@ -1,0 +1,72 @@
+{
+  "capabilities": [
+    {
+      "id": "calling",
+      "title": "Calling",
+      "description": "Place phone calls to the user's contacts or to a number the user says.",
+      "load": "eager",
+      "tools": [
+        { "name": "find_contact", "where": "local" },
+        { "name": "place_call", "where": "local" }
+      ]
+    },
+    {
+      "id": "clock",
+      "title": "Clock",
+      "description": "Set timers and alarms in the Clock app.",
+      "load": "eager",
+      "tools": [
+        { "name": "set_timer", "where": "local" },
+        { "name": "set_alarm", "where": "local" }
+      ]
+    },
+    {
+      "id": "music",
+      "title": "Music",
+      "description": "Play music from the user's library and control playback.",
+      "load": "eager",
+      "tools": [
+        { "name": "play_music", "where": "local" },
+        { "name": "music_control", "where": "local" }
+      ]
+    },
+    {
+      "id": "navigation",
+      "title": "Navigation",
+      "description": "Start turn-by-turn navigation to a place, an address, home, work, or a contact.",
+      "load": "eager",
+      "tools": [
+        { "name": "navigate", "where": "local" },
+        { "name": "find_contact", "where": "local", "required": false }
+      ]
+    },
+    {
+      "id": "search",
+      "title": "Web search",
+      "description": "Search the web for anything current or changing: news, scores, prices, opening hours. Not for weather.",
+      "load": "lazy",
+      "tools": [
+        { "name": "web_search", "where": "remote" }
+      ]
+    },
+    {
+      "id": "texting",
+      "title": "Texting",
+      "description": "Send text messages to the user's contacts.",
+      "load": "eager",
+      "tools": [
+        { "name": "find_contact", "where": "local" },
+        { "name": "send_sms", "where": "local" }
+      ]
+    },
+    {
+      "id": "weather",
+      "title": "Weather",
+      "description": "Current conditions and forecasts for the user's location or a named place.",
+      "load": "eager",
+      "tools": [
+        { "name": "get_weather", "where": "hybrid" }
+      ]
+    }
+  ]
+}
