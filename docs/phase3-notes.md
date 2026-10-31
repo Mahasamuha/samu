@@ -107,3 +107,9 @@ Deployment (2026-10-22): the gateway and MCP images are published to Docker Hub 
 Navigation and options (2026-10-22, Pixel 8): `navigate` opened Waze or Google Maps for a named place, the saved work address, and a contact's address; with device location off, the one-tap Play services dialog appeared after the panel closed and navigation started on OK. The voice picker lists nine on-device voices on the Pixel 8 (network voices excluded); the chosen voice was used by the next session.
 
 Uncommon contact names (2026-10-22): speech recognition wrote them as more common spellings, so the provider's prefix filter found nothing. `EXTRA_ENABLE_BIASING_DEVICE_CONTEXT` made no visible difference and was removed; passing all ~240 contact names as `EXTRA_BIASING_STRINGS` was not tried (no documented limit, and a long list risks pulling ordinary words toward names). A sound-alike fallback works: in two logged lookups the right contact scored 0.96–1.00 and the next-best wrong one 0.08–0.12 lower, with other noise from 0.75 up, so candidates must score at least 0.80 and be within 0.06 of the best. In a sample test, Irish spellings (Ciara, Aoife) scored poorly; a nickname on the contact is the dependable fix.
+
+## Open issues from use (2026-10-24, not yet investigated)
+
+- **First request not heard.** Speech recognition sometimes doesn't register the first request of a session; closing and reopening the assistant is the only way to get it listening.
+- **"Play some music" is incoherent.** An unqualified request plays truly random tracks with no genre or thread, rather than picking something and staying with it.
+- **Sonos Move playback.** Asked to play on the Sonos Move, it seemed to target a group coordinator although the Move is a single speaker: the Move looked half-selected but nothing played until it was tapped in the app's cast options and play was pressed manually.

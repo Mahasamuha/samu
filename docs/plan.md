@@ -1,6 +1,6 @@
 # Phone Assistant — Plan (draft)
 
-Status: phases 1–3 done (`docs/phase1-notes.md`, `docs/phase2-notes.md`, `docs/phase3-notes.md`); the server side is deployed on the home server, and the app is in daily use on the Pixel 8. Built since phase 3: navigation (2026-10-22), timers and alarms (2026-10-23). Planned next in §5a: search results list, music, reminders.
+Status: phases 1–3 done (`docs/phase1-notes.md`, `docs/phase2-notes.md`, `docs/phase3-notes.md`); the server side is deployed on the home server, and the app is in daily use on the Pixel 8. Built since phase 3: navigation (2026-10-22), timers and alarms (2026-10-23). Planned next in §5a: search results list, music, reminders. Prioritized ahead of new services that need their own credentials: multi-user isolation (§6).
 
 ## 1. Goal
 
@@ -11,7 +11,7 @@ A personal voice assistant on Android, roughly what Google Assistant used to be,
 - Optionally understand what's on screen ("reply to this", "add this to my calendar").
 - Use a hosted LLM API with spend that is tracked and capped.
 
-Non-goals for now: self-hosted model, Play Store distribution, multi-user, iOS.
+Non-goals for now: self-hosted model, iOS. (Multi-user and Play Store distribution were non-goals until 2026-10-24: see §6, multi-user isolation; a Google Play developer account is being set up under the Mahasamuha business.)
 
 ## 2. Decisions made
 
@@ -277,12 +277,19 @@ The setup screen in `MainActivity` doubles as the options screen. Settings live 
   - Privacy: reading a notification through the LLM sends its text to Anthropic via the gateway and possibly into the gateway's body logs. Preferred design: the phone reads sender and subject or preview aloud locally, with no model call, and the model sees a notification only when the user asks to act on it. Anthropic API data isn't used for training by default; retention is short but non-zero, and zero data retention is an enterprise arrangement, not a setting.
   - Also provides "what's playing" from media sessions, independent of Plex (music item above).
 - **Notes and shared memory via Constellation:** Samu reading and writing notes that other agents (claude.ai, Claude Code) can also use, with Constellation as the storage backend: plain files on a share, Obsidian-vault style, rather than a memory system of its own. Part of a separate memory project whose design isn't settled (including whether Constellation is the backend); Samu should follow it, not define it. Points so far:
-  - Path: preferred is a narrow remote tool on Samu's MCP server (e.g. `add_note`, maybe `read_notes`) that calls Constellation server to server, so the phone keeps one MCP endpoint, one token audience, and the minimal client. Needs a Constellation credential on Samu's server scoped to one notes share; an exception to pass-through auth, acceptable for a single-user service. Alternative: the phone talks to Constellation's MCP directly, which adds a second audience and may need `initialize`/sessions (unchecked), breaking the stateless-client assumption (§2, MCP client row).
+  - Path: preferred is a narrow remote tool on Samu's MCP server (e.g. `add_note`, maybe `read_notes`) that calls Constellation server to server, so the phone keeps one MCP endpoint, one token audience, and the minimal client. Needs a Constellation credential on Samu's server scoped to one notes share; an exception to pass-through auth, acceptable for a single-user service; under multi-user isolation (below) it becomes a per-user credential. Alternative: the phone talks to Constellation's MCP directly, which adds a second audience and may need `initialize`/sessions (unchecked), breaking the stateless-client assumption (§2, MCP client row).
   - Surface: never expose Constellation's general file tools (`write_file`, `edit_file`, `move`, `delete`) to the phone's model, which reads web content. Append-style writes only; reads limited to the notes share.
   - Confirmation: a write is a remote action tool, so it asks by default; it needs a server read-back template (§4b) so the note text is read back from the actual arguments.
   - Fits the memory row: notes are user-requested data, not a log of sessions.
   - Swap point: the tool name and skill stay the same if the backend later changes (e.g. to a structured memory engine).
   - The same path could carry reminders (option c above) if a synced backend is wanted.
+- **Multi-user isolation (prioritized 2026-10-24):** build per-user identity and credential scoping before adding more services that need their own credentials (Home Assistant, Audiobookshelf, notes, a task app), so each is done securely once rather than retrofitted. Still one user in practice; the point is that nothing assumes it. Supersedes "multi-user" in §1's non-goals. Not designed yet; points so far:
+  - Identity end to end: the gateway validates the token but forwards `/mcp` anonymously (§4b), so the MCP server doesn't know whose request it is. It should receive the verified subject (`sub`) in a form it can trust: the token itself, verified again by the MCP server, or a header it accepts only from the gateway. Forwarding the token is simpler to reason about.
+  - Two kinds of server-held secret. *Service keys* the deployment owns (Brave, Pirate Weather) can stay shared in `deploy/.env`, with per-user limits. *User credentials* for a user's own data (Plex, Home Assistant, Audiobookshelf, Constellation) are keyed by subject and never shared. `music_find`'s Plex device token is the first of these and the first to move.
+  - Where user credentials live: env vars don't scale past one user. Options: an encrypted per-user store on the MCP server (gives up "stateless", in a contained way); or delegation through Asterism / Authentik token exchange where the downstream service speaks OAuth, which matches the pass-through auth preference. Most of these services use static tokens, so a store is likely needed for some regardless.
+  - Everything else that's global today becomes per subject: the Bifrost virtual key and budget (today one per phone, §4), the gateway rate limit, body-log retention and the debug toggle, and server-side settings (e.g. default speakers).
+  - A remote tool appears in a user's `tools/list` only when that user has the credential it needs, as local tools follow permissions (§4b).
+  - Order: subject propagation and keying credentials by subject first. Cheap with one user, and it makes the rest additive.
 - **Getting back to a session after opening a page:** tapping a result or a sources-pill page closes the panel, which discards the session (memory row, §2), so going back to try a different result means searching again. Undecided. A short window fits the memory decision's intent (no persistent record, memory only), provided the state is never written to disk: not to preferences or files, and not to saved-state bundles that Android may persist. Losing it on process death is acceptable. Candidates:
   - *Resume window:* closing hides the session and keeps it in memory for a short time (a few minutes); invoking again within it restores the conversation, results list included. Covers follow-up questions too.
   - *Results-only persistence:* only the last results list survives the window; invoking again shows it to tap a different result. Narrower, matches the search use case.
