@@ -1,6 +1,6 @@
 # Phase 4 — Principals, credentials, and connectors (plan)
 
-Status: planned 2026-10-31, nothing built. This becomes phase 4; screen context moves to phase 5 and the old phase 5 (gaps) to phase 6. Update `docs/plan.md` §5 and the CLAUDE.md "Current phase" section in the same change that starts this work.
+Status: planned 2026-10-31, nothing built. This becomes phase 4; screen context moves to phase 5 and the old phase 5 (gaps) to phase 6. `docs/plan.md` §5 was renumbered when phase 3.5 started (2026-10-31); update the CLAUDE.md "Current phase" section in the change that starts this work. Builds on phase 3.5 (`docs/phase3.5-plan.md`).
 
 ## 1. Goal
 
@@ -103,6 +103,7 @@ Phone ── HTTPS + bearer ──▶ Reverse proxy ──▶ Auth gateway
 ### MCP service
 
 - `buildServer()` becomes `buildServer(principal)`. Tools register only when accounts resolves a credential for their connector, so availability per person falls out of resolution.
+- Per-principal availability reaches the phone through `capability://index` (phase 3.5): the index lists only capabilities whose required remote tools registered for this principal. Connector capabilities come from the accounts catalog; their text never comes from upstream servers. The phone's index cache is keyed to the principal and deleted on sign-out.
 - Existing tools (`web_search`, `get_weather`, `music_find`) read their key from accounts instead of env. Env keys become a migration path only (§8 step 2), then go away.
 - New: an MCP client to upstream connectors. For each connected upstream, it fetches `tools/list`, keeps the catalog's allowlisted tools, namespaces them (`constellation__read_file`), and forwards `tools/call` with the principal's token for that upstream.
 - Upstream tool annotations are not trusted for confirmation. The catalog sets `readOnlyHint` and the confirmation template (`_meta`, plan §4b) on the tools it re-exposes.

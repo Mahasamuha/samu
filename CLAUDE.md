@@ -15,6 +15,7 @@ mcp/       MCP server for remote tools (web search) — TypeScript on Node, pnpm
 deploy/    Server-side config: compose files for gateway + Bifrost, reverse proxy snippets, env templates (placeholders only)
 docs/      plan.md and any design notes
 skills/    SKILL.md instruction bundles (plan §4b); bundled into the app (delivery: app) or served as drafts (delivery: server)
+capabilities/  capabilities.json: groups tools into capabilities (phase 3.5); bundled into the app (local, hybrid) and served by mcp/ (hybrid, server)
 ```
 
 These are independent build units. Don't introduce a monorepo tool unless one is clearly needed.
@@ -74,7 +75,7 @@ No infrastructure specifics go into tracked files or commit messages. This cover
 
 ## Current phase
 
-Phases 1–3 are done (`docs/phase1-notes.md`, `docs/phase2-notes.md`, `docs/phase3-notes.md`): invocation, the gateway + Bifrost voice round trip, and the tools-and-skills design in plan §4b, including the MCP server (web search, Pirate Weather). Two security review rounds have been fixed and checked on device. **The server side is deployed on the home server**: the gateway and MCP images are published to Docker Hub by `.github/workflows/images.yml` and pulled there (`deploy/README.md`); the dev stack on the workstation is stopped. Next: daily use on the Pixel 8, then phase 4 (screen context) only if a real need shows up. Draft skills via MCP wait until a draft exists. The phase 1 and phase 2 sections below are kept as the original briefs.
+Phases 1–3 are done (`docs/phase1-notes.md`, `docs/phase2-notes.md`, `docs/phase3-notes.md`): invocation, the gateway + Bifrost voice round trip, and the tools-and-skills design in plan §4b, including the MCP server (web search, Pirate Weather). Two security review rounds have been fixed and checked on device. **The server side is deployed on the home server**: the gateway and MCP images are published to Docker Hub by `.github/workflows/images.yml` and pulled there (`deploy/README.md`); the dev stack on the workstation is stopped. **In progress: phase 3.5, capabilities and late binding** (`docs/phase3.5-plan.md`): a capability manifest in `capabilities/`, a `capability://index` MCP resource cached on the phone, and eager/lazy binding through `use_capability`. Then phase 4, principals, credentials and connectors (`docs/phase4-plan.md`); screen context moved to phase 5. Draft skills reach the phone through the capability index once a draft exists. The phase 1 and phase 2 sections below are kept as the original briefs.
 
 ### Phase 1 — Prove invocation
 
