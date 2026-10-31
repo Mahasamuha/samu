@@ -1,3 +1,5 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
 import java.util.Properties
 
 plugins {
@@ -37,6 +39,64 @@ abstract class BundleSkills : DefaultTask() {
 
 val bundleSkills = tasks.register<BundleSkills>("bundleSkills") {
     skillsDir.set(layout.projectDirectory.dir("../skills"))
+}
+
+/**
+ * Writes the local and hybrid entries of the repo's capabilities manifest into the APK's assets (plan
+ * phase 3.5). Server-only entries are the MCP server's. Fails the build if a local tool the app registers
+ * belongs to no local or hybrid capability, or if the manifest names a local tool the app doesn't have.
+ */
+abstract class BundleCapabilities : DefaultTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val manifest: RegularFileProperty
+
+    /** The app's Kotlin sources, scanned for the tools it registers. */
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val sources: ConfigurableFileCollection
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun bundle() {
+        @Suppress("UNCHECKED_CAST")
+        val entries = (JsonSlurper().parse(manifest.get().asFile) as Map<String, Any?>)["capabilities"] as List<Map<String, Any?>>
+
+        // Every local tool declares itself as `ToolDefinition(name = "<tool>", ...)`.
+        val toolPattern = Regex("""ToolDefinition\(\s*name\s*=\s*"([^"]+)"""")
+        val appTools = sources.files.filter { it.extension == "kt" }
+            .flatMap { file -> toolPattern.findAll(file.readText()).map { it.groupValues[1] } }
+            .toSet()
+        if (appTools.isEmpty()) {
+            throw GradleException("Found no `ToolDefinition(name = \"...\")` in the app sources; the capability check can't run. Did the tool declaration style change?")
+        }
+
+        fun tools(entry: Map<String, Any?>) = (entry["tools"] as List<*>).map { @Suppress("UNCHECKED_CAST") (it as Map<String, Any?>) }
+        // Tier from `where`: local only = local, remote only = server, anything else = hybrid.
+        fun isServerOnly(entry: Map<String, Any?>) = tools(entry).all { it["where"] == "remote" }
+
+        val bundled = entries.filterNot(::isServerOnly)
+        val covered = bundled.flatMap { entry -> tools(entry).filter { it["where"] != "remote" }.map { it["name"] as String } }.toSet()
+
+        val orphans = (appTools - covered).sorted()
+        if (orphans.isNotEmpty()) {
+            throw GradleException("Local tools in no local or hybrid capability in capabilities/capabilities.json: ${orphans.joinToString()}")
+        }
+        val unknown = (covered - appTools).sorted()
+        if (unknown.isNotEmpty()) {
+            throw GradleException("capabilities/capabilities.json lists local or hybrid tools the app doesn't register: ${unknown.joinToString()}")
+        }
+
+        val out = outputDir.get().asFile.apply { deleteRecursively(); mkdirs() }
+        File(out, "capabilities.json").writeText(JsonOutput.prettyPrint(JsonOutput.toJson(mapOf("capabilities" to bundled))) + "\n")
+    }
+}
+
+val bundleCapabilities = tasks.register<BundleCapabilities>("bundleCapabilities") {
+    manifest.set(layout.projectDirectory.file("../capabilities/capabilities.json"))
+    sources.from(fileTree("src/main/java") { include("**/*.kt") })
 }
 
 fun localConfigValue(key: String): String =
@@ -101,6 +161,7 @@ android {
 androidComponents {
     onVariants { variant ->
         variant.sources.assets?.addGeneratedSourceDirectory(bundleSkills, BundleSkills::outputDir)
+        variant.sources.assets?.addGeneratedSourceDirectory(bundleCapabilities, BundleCapabilities::outputDir)
     }
 }
 

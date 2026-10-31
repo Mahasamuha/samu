@@ -10,6 +10,8 @@ import android.util.Log
 import com.mahasamuha.assistant.auth.AuthManager
 import com.mahasamuha.assistant.auth.TokenStore
 import com.mahasamuha.assistant.calls.PlaceCallTool
+import com.mahasamuha.assistant.capabilities.BundledCapabilities
+import com.mahasamuha.assistant.capabilities.CapabilityCache
 import com.mahasamuha.assistant.clock.SetAlarmTool
 import com.mahasamuha.assistant.clock.SetTimerTool
 import com.mahasamuha.assistant.contacts.ContactDirectory
@@ -40,7 +42,7 @@ import com.mahasamuha.assistant.weather.WeatherTool
 /** Holds the app-wide singletons; constructed by hand (no DI framework at this size). */
 class AssistantApp : Application() {
     val config by lazy { AppConfig.fromBuildConfig() }
-    val auth by lazy { AuthManager(this, config, TokenStore(this)) }
+    val auth: AuthManager by lazy { AuthManager(this, config, TokenStore(this), onSignedOut = { capabilityCache.clear() }) }
     val chatClient: ChatClient by lazy { GatewayChatClient(config.gatewayUrls, auth) }
     val locationSource: LocationSource by lazy { PlatformLocationSource(this) }
     val savedPlaces by lazy { SavedPlaces(this) }
@@ -50,6 +52,8 @@ class AssistantApp : Application() {
     private val contacts by lazy { ContactDirectory(contentResolver, resources) }
     private val smsSender by lazy { SmsSender(this) }
     private val mcpClient by lazy { McpClient(config.gatewayUrls, auth) }
+    val bundledCapabilities by lazy { BundledCapabilities(assets) }
+    val capabilityCache: CapabilityCache by lazy { CapabilityCache(noBackupFilesDir, auth, mcpClient) }
     private val remoteTools by lazy { RemoteTools(mcpClient) }
     private val symfonium by lazy { Symfonium(this) }
     private val speakerDirectory by lazy { SpeakerDirectory(this) }

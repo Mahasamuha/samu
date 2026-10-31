@@ -69,6 +69,8 @@ class MainActivity : ComponentActivity() {
     // Plays the samples; the activity is visible, so its own speech is allowed.
     private lateinit var speaker: PlatformSpeaker
     private var work by mutableStateOf("")
+    private var capabilityStatus by mutableStateOf("")
+    private var refreshingCapabilities by mutableStateOf(false)
 
     private val requestMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         micAllowed = granted
@@ -109,6 +111,7 @@ class MainActivity : ComponentActivity() {
         voice = app.voicePreference.name
         speaker = PlatformSpeaker(this)
         runReporting("Voices") { voices = speaker.voices(); null }
+        runReporting("Capabilities") { capabilityStatus = describeCapabilityCache(); null }
         setContent {
             val signedIn by app.auth.signedIn.collectAsState()
             AssistantTheme {
@@ -132,7 +135,10 @@ class MainActivity : ComponentActivity() {
                     onPickVoice = ::pickVoice,
                     onOpenAssistantSettings = { open(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) },
                     onSignIn = { runReporting("Sign-in") { signIn.launch(app.auth.signInIntent()); null } },
-                    onSignOut = { runReporting("Sign-out") { app.auth.signOut(); "Signed out" } },
+                    onSignOut = { runReporting("Sign-out") { app.auth.signOut(); capabilityStatus = describeCapabilityCache(); "Signed out" } },
+                    capabilityStatus = capabilityStatus,
+                    refreshingCapabilities = refreshingCapabilities,
+                    onRefreshCapabilities = ::refreshCapabilities,
                     onAllowMic = { requestMic.launch(Manifest.permission.RECORD_AUDIO) },
                     onAllowLocation = { requestLocation.launch(Manifest.permission.ACCESS_COARSE_LOCATION) },
                     onAllowContacts = { requestContacts.launch(Manifest.permission.READ_CONTACTS) },
@@ -170,6 +176,37 @@ class MainActivity : ComponentActivity() {
             speaker.speak(VOICE_SAMPLE)
             null
         }
+    }
+
+    /** Fetches the capability index now and shows the outcome. */
+    private fun refreshCapabilities() {
+        if (refreshingCapabilities) return
+        refreshingCapabilities = true
+        runReporting("Capabilities") {
+            try {
+                val result = app.capabilityCache.refresh()
+                capabilityStatus = describeCapabilityCache()
+                result.fold(
+                    onSuccess = { "Capabilities updated (${it.capabilities.size} from the server)" },
+                    onFailure = { "Refresh failed: ${it.message ?: it.javaClass.simpleName}" },
+                )
+            } finally {
+                refreshingCapabilities = false
+            }
+        }
+    }
+
+    private suspend fun describeCapabilityCache(): String {
+        val index = app.capabilityCache.current()
+            ?: return "Not fetched yet. Using the built-in capabilities."
+        val minutes = index.ageMillis() / 60_000
+        val age = when {
+            minutes < 1 -> "just now"
+            minutes < 60 -> "$minutes min ago"
+            minutes < 24 * 60 -> "${minutes / 60} h ago"
+            else -> "${minutes / (24 * 60)} d ago"
+        }
+        return "Updated $age (${index.capabilities.size} from the server)."
     }
 
     /** UI boundary: runs [block] and shows its result, or the error, as the status message. */
@@ -221,6 +258,9 @@ private fun SetupScreen(
     onOpenAssistantSettings: () -> Unit,
     onSignIn: () -> Unit,
     onSignOut: () -> Unit,
+    capabilityStatus: String,
+    refreshingCapabilities: Boolean,
+    onRefreshCapabilities: () -> Unit,
     onAllowMic: () -> Unit,
     onAllowLocation: () -> Unit,
     onAllowContacts: () -> Unit,
@@ -289,6 +329,19 @@ private fun SetupScreen(
             MonoLabel("account")
             Status(signedIn, if (signedIn) "Signed in." else "Not signed in.")
             if (signedIn) GhostButton("sign out", onSignOut) else Action(Step.SignIn, "sign in →", onSignIn)
+
+            Hairline()
+            MonoLabel("capabilities")
+            Text(
+                "What Samu can do beyond the built-in tools comes from the server, and is kept on this phone. " +
+                    "Refresh it here after changing the server.",
+                style = AppType.body,
+                color = colors.textBody,
+            )
+            Text(capabilityStatus, style = AppType.caption, color = colors.textMuted)
+            if (signedIn) {
+                GhostButton(if (refreshingCapabilities) "refreshing…" else "refresh capabilities", onRefreshCapabilities)
+            }
 
             Hairline()
             MonoLabel("permissions")

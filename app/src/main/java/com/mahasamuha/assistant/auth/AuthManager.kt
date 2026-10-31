@@ -3,6 +3,7 @@ package com.mahasamuha.assistant.auth
 import android.content.Context
 import android.content.Intent
 import android.security.keystore.KeyPermanentlyInvalidatedException
+import android.util.Base64
 import android.util.Log
 import com.mahasamuha.assistant.AppConfig
 import com.mahasamuha.assistant.voice.TAG
@@ -17,6 +18,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import net.openid.appauth.AuthState
 import net.openid.appauth.AuthorizationException
 import net.openid.appauth.AuthorizationRequest
@@ -35,7 +37,13 @@ class SignInException(message: String, cause: Throwable? = null) : Exception(mes
  * Sign-in with authorization code + PKCE (AppAuth, Custom Tab), and fresh access tokens on demand.
  * Refresh tokens rotate on use, so the state is persisted after every refresh.
  */
-class AuthManager(context: Context, private val config: AppConfig, private val store: TokenStore) {
+class AuthManager(
+    context: Context,
+    private val config: AppConfig,
+    private val store: TokenStore,
+    /** Called whenever the signed-in state is dropped (sign-out, rejected refresh token). */
+    private val onSignedOut: () -> Unit = {},
+) {
     private val service = AuthorizationService(context)
     private val mutex = Mutex()
     private var state: AuthState? = null
@@ -93,6 +101,23 @@ class AuthManager(context: Context, private val config: AppConfig, private val s
 
     suspend fun signOut() = mutex.withLock { clearLocked() }
 
+    /**
+     * Who is signed in: the `sub` claim of the access token (the identity the gateway sees), else of the
+     * ID token. Read from the stored state without a network call, so it works with an expired token.
+     * Null when signed out or when neither token carries a subject.
+     */
+    suspend fun principal(): String? = mutex.withLock {
+        val current = loadState() ?: return@withLock null
+        listOfNotNull(current.accessToken, current.idToken).firstNotNullOfOrNull(::subjectOf)
+    }
+
+    private fun subjectOf(jwt: String): String? = try {
+        val payload = Base64.decode(jwt.split(".")[1], Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+        JSONObject(String(payload, Charsets.UTF_8)).optString("sub").takeIf { it.isNotEmpty() }
+    } catch (e: Exception) {
+        null // an opaque (non-JWT) token
+    }
+
     fun keySecurityLevel(): String = store.keySecurityLevel()
 
     private suspend fun loadState(): AuthState? {
@@ -119,6 +144,7 @@ class AuthManager(context: Context, private val config: AppConfig, private val s
         store.clear()
         state = null
         _signedIn.value = false
+        onSignedOut()
     }
 
     private suspend fun exchange(request: TokenRequest): TokenResponse = suspendCancellableCoroutine { cont ->

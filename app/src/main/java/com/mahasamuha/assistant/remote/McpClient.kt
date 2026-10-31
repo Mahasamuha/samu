@@ -34,7 +34,7 @@ class McpClient(private val gateways: List<Uri>, private val auth: AuthManager) 
         do {
             val result = request("tools/list", JSONObject().apply { cursor?.let { put("cursor", it) } })
             val tools = result.optJSONArray("tools") ?: JSONArray()
-            for (i in 0 until tools.length()) definitions += definition(tools.getJSONObject(i))
+            for (i in 0 until tools.length()) definitions += toolDefinition(tools.getJSONObject(i))
             cursor = result.optString("nextCursor").takeIf { it.isNotEmpty() }
         } while (cursor != null)
         return definitions
@@ -52,7 +52,15 @@ class McpClient(private val gateways: List<Uri>, private val auth: AuthManager) 
         return text
     }
 
-    private suspend fun request(method: String, params: JSONObject): JSONObject {
+    /** Reads a resource and returns its first content's text (the capability index is one JSON document). */
+    suspend fun readResource(uri: String): String {
+        val result = request("resources/read", JSONObject().put("uri", uri), maxBytes = MAX_RESOURCE_BYTES)
+        val contents = result.optJSONArray("contents")
+        val text = contents?.takeIf { it.length() > 0 }?.getJSONObject(0)?.optString("text")?.takeIf { it.isNotEmpty() }
+        return text ?: throw McpException("MCP resource $uri has no text content")
+    }
+
+    private suspend fun request(method: String, params: JSONObject, maxBytes: Int = MAX_RESPONSE_BYTES): JSONObject {
         val token = auth.freshAccessToken()
         val body = JSONObject()
             .put("jsonrpc", "2.0")
@@ -75,9 +83,9 @@ class McpClient(private val gateways: List<Uri>, private val auth: AuthManager) 
                 connection.outputStream.use { it.write(body.toString().toByteArray()) }
                 val status = connection.responseCode
                 if (status != HttpURLConnection.HTTP_OK) throw McpException("MCP $method returned $status")
-                // Capped: the result goes to the model, so an oversized one costs tokens on every later round.
-                val bytes = connection.inputStream.use { it.readNBytes(MAX_RESPONSE_BYTES + 1) }
-                if (bytes.size > MAX_RESPONSE_BYTES) throw McpException("MCP $method response is over $MAX_RESPONSE_BYTES bytes")
+                // Capped: a tool result goes to the model, so an oversized one costs tokens on every later round.
+                val bytes = connection.inputStream.use { it.readNBytes(maxBytes + 1) }
+                if (bytes.size > maxBytes) throw McpException("MCP $method response is over $maxBytes bytes")
                 bytes.toString(Charsets.UTF_8)
             } catch (e: IOException) {
                 throw McpException("MCP $method failed", e)
@@ -105,25 +113,28 @@ class McpClient(private val gateways: List<Uri>, private val auth: AuthManager) 
         }
     }
 
-    private fun definition(tool: JSONObject): ToolDefinition {
-        val annotations = tool.optJSONObject("annotations") ?: JSONObject()
-        val defaults = ToolAnnotations()
-        return ToolDefinition(
-            name = tool.getString("name"),
-            description = tool.optString("description"),
-            inputSchema = tool.optJSONObject("inputSchema") ?: JSONObject().put("type", "object"),
-            annotations = ToolAnnotations(
-                title = annotations.optString("title").ifEmpty { tool.optString("title") }.ifEmpty { null },
-                readOnlyHint = annotations.optBoolean("readOnlyHint", defaults.readOnlyHint),
-                destructiveHint = annotations.optBoolean("destructiveHint", defaults.destructiveHint),
-                idempotentHint = annotations.optBoolean("idempotentHint", defaults.idempotentHint),
-                openWorldHint = annotations.optBoolean("openWorldHint", defaults.openWorldHint),
-            ),
-        )
-    }
-
     private companion object {
         const val PROTOCOL_VERSION = "2025-06-18"
         const val MAX_RESPONSE_BYTES = 64 * 1024
+        // The capability index (tool definitions and skills) never reaches the model whole.
+        const val MAX_RESOURCE_BYTES = 256 * 1024
     }
+}
+
+/** A tool definition in MCP's `tools/list` shape; also used for the definitions inside the capability index. */
+fun toolDefinition(tool: JSONObject): ToolDefinition {
+    val annotations = tool.optJSONObject("annotations") ?: JSONObject()
+    val defaults = ToolAnnotations()
+    return ToolDefinition(
+        name = tool.getString("name"),
+        description = tool.optString("description"),
+        inputSchema = tool.optJSONObject("inputSchema") ?: JSONObject().put("type", "object"),
+        annotations = ToolAnnotations(
+            title = annotations.optString("title").ifEmpty { tool.optString("title") }.ifEmpty { null },
+            readOnlyHint = annotations.optBoolean("readOnlyHint", defaults.readOnlyHint),
+            destructiveHint = annotations.optBoolean("destructiveHint", defaults.destructiveHint),
+            idempotentHint = annotations.optBoolean("idempotentHint", defaults.idempotentHint),
+            openWorldHint = annotations.optBoolean("openWorldHint", defaults.openWorldHint),
+        ),
+    )
 }
