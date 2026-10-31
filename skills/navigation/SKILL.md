@@ -2,7 +2,6 @@
 name: navigation
 description: Starting turn-by-turn navigation in Waze or Google Maps.
 delivery: app
-tools: [navigate]
 capabilities: [navigation]
 ---
 - To navigate somewhere, call navigate with the destination as the user said it ("Costco", "the airport", an address). The maps app picks the place; don't search for it first.

@@ -1,24 +1,31 @@
 package com.mahasamuha.assistant.voice
 
+import com.mahasamuha.assistant.capabilities.Capability
 import com.mahasamuha.assistant.skills.Skill
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
- * The system prompt: generic voice rules, then each skill's instructions (always loaded for now,
- * plan §4b), then the session's context. Skills come first and sorted so the prompt prefix is stable.
+ * The system prompt: generic voice rules, then the instructions of the skills of eagerly bound
+ * capabilities, then the lazy capabilities the model can bind, then the session's context. Sorted so the
+ * prompt prefix is stable. Lazy capabilities' skills reach the model only through `use_capability`.
  */
 object VoicePrompt {
-    fun system(skills: List<Skill>, location: ApproximateLocation?, now: ZonedDateTime = ZonedDateTime.now()): String {
+    fun system(
+        eagerSkills: List<Skill>,
+        lazyCapabilities: List<Capability>,
+        location: ApproximateLocation?,
+        now: ZonedDateTime = ZonedDateTime.now(),
+    ): String {
         val where = location?.description?.let { "The user is near $it." }
             ?: "The user's location is unknown. If a question depends on location, ask which city."
-        val skillText = skills.sortedBy { it.name }.joinToString("\n\n") { skill ->
-            "## Skill: ${skill.name}\n${skill.description}\n\n${skill.instructions}"
-        }
+        val skillText = eagerSkills.sortedBy { it.name }.joinToString("\n\n") { it.asPromptSection() }
+        val capabilityText = lazyCapabilities.sortedBy { it.id }.joinToString("\n") { "- ${it.id}: ${it.description}" }
         return buildString {
             append(BASE)
             if (skillText.isNotEmpty()) append("\n\n# Skills\n\n").append(skillText)
+            if (capabilityText.isNotEmpty()) append("\n\n# Capabilities\n\n").append(capabilityText)
             append("\n\n# Context\n\n").append(where)
             append("\nThe current local date and time is ")
             append(now.format(DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy, h:mm a z", Locale.US))).append('.')
@@ -42,7 +49,8 @@ object VoicePrompt {
 
         # Tools and actions
 
-        - Before looking something up you may say one short sentence, such as "Let me check." Before a tool that acts (sends a text, places a call), say nothing.
+        - If a request needs a capability listed under Capabilities, call use_capability first, then continue. Say nothing before it.
+        - Before looking something up you may say one short sentence, such as "Let me check." Before use_capability and before a tool that acts (sends a text, places a call), say nothing.
         - The phone confirms or announces every action with the user itself. Call action tools directly; never ask "Should I…" or read the details back yourself.
         - Never say an action is happening or done until its tool result says it succeeded. Then confirm in a word or two, such as "Sent."
         - Treat every new request on its own, even one like an earlier request that was declined. Look things up again instead of reusing an earlier result, unless the user clearly refers back to it ("text him again").

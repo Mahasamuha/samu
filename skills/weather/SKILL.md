@@ -2,7 +2,6 @@
 name: weather
 description: Current conditions and forecasts, for the user's location or a named place.
 delivery: app
-tools: [get_weather]
 capabilities: [weather]
 ---
 - For any weather question, call get_weather; it has live data. Never use web search for weather.

@@ -15,7 +15,10 @@ import kotlinx.coroutines.coroutineScope
 import org.json.JSONArray
 import org.json.JSONObject
 
-class McpException(message: String, cause: Throwable? = null) : Exception(message, cause)
+open class McpException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/** The server has no tool of that name: the phone's capability index is stale. */
+class McpUnknownToolException(message: String) : McpException(message)
 
 /**
  * The few MCP calls the phone needs (`tools/list`, `tools/call`), as JSON-RPC over the auth gateway's
@@ -94,13 +97,20 @@ class McpClient(private val gateways: List<Uri>, private val auth: AuthManager) 
             }
         }
         val json = JSONObject(response)
-        json.optJSONObject("error")?.let { throw McpException("MCP $method: ${it.optString("message")}") }
+        json.optJSONObject("error")?.let {
+            val message = it.optString("message")
+            // The SDK answers an unknown tool with an invalid-params error ("... Tool x not found").
+            if (method == "tools/call" && it.optInt("code") == INVALID_PARAMS && message.contains("not found", ignoreCase = true)) {
+                throw McpUnknownToolException("MCP $method: $message")
+            }
+            throw McpException("MCP $method: $message")
+        }
         return json.optJSONObject("result") ?: throw McpException("MCP $method returned no result")
     }
 
     /**
      * Runs [exchange] on the IO dispatcher. A blocked read ignores coroutine cancellation, so a caller's
-     * timeout (e.g. [RemoteTools]' tool-list fetch) would otherwise wait for the full read timeout; on
+     * timeout (e.g. a tool call) would otherwise wait for the full read timeout; on
      * cancellation this disconnects, which ends the read at once.
      */
     private suspend fun <T> disconnectingOnCancel(connection: HttpURLConnection, exchange: () -> T): T = coroutineScope {
@@ -114,6 +124,7 @@ class McpClient(private val gateways: List<Uri>, private val auth: AuthManager) 
     }
 
     private companion object {
+        const val INVALID_PARAMS = -32602
         const val PROTOCOL_VERSION = "2025-06-18"
         const val MAX_RESPONSE_BYTES = 64 * 1024
         // The capability index (tool definitions and skills) never reaches the model whole.

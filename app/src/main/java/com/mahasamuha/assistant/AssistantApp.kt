@@ -6,12 +6,14 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.telecom.TelecomManager
 import android.telephony.TelephonyManager
-import android.util.Log
 import com.mahasamuha.assistant.auth.AuthManager
 import com.mahasamuha.assistant.auth.TokenStore
 import com.mahasamuha.assistant.calls.PlaceCallTool
 import com.mahasamuha.assistant.capabilities.BundledCapabilities
+import com.mahasamuha.assistant.capabilities.CachedIndex
 import com.mahasamuha.assistant.capabilities.CapabilityCache
+import com.mahasamuha.assistant.capabilities.CapabilityCatalog
+import com.mahasamuha.assistant.capabilities.SessionCatalog
 import com.mahasamuha.assistant.clock.SetAlarmTool
 import com.mahasamuha.assistant.clock.SetTimerTool
 import com.mahasamuha.assistant.contacts.ContactDirectory
@@ -24,20 +26,24 @@ import com.mahasamuha.assistant.music.SpeakerDirectory
 import com.mahasamuha.assistant.music.Symfonium
 import com.mahasamuha.assistant.navigation.NavigateTool
 import com.mahasamuha.assistant.navigation.SavedPlaces
-import com.mahasamuha.assistant.remote.FallbackTool
 import com.mahasamuha.assistant.remote.McpClient
-import com.mahasamuha.assistant.remote.RemoteTools
+import com.mahasamuha.assistant.remote.remoteTool
 import com.mahasamuha.assistant.skills.BundledSkills
 import com.mahasamuha.assistant.sms.SendSmsTool
 import com.mahasamuha.assistant.sms.SmsSender
-import com.mahasamuha.assistant.tools.ReadOnlyTool
-import com.mahasamuha.assistant.tools.ToolRegistry
 import com.mahasamuha.assistant.voice.TAG
 import com.mahasamuha.assistant.voice.LocationSource
 import com.mahasamuha.assistant.voice.PlatformLocationSource
 import com.mahasamuha.assistant.voice.VoicePreference
 import com.mahasamuha.assistant.weather.OpenMeteoWeather
 import com.mahasamuha.assistant.weather.WeatherTool
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /** Holds the app-wide singletons; constructed by hand (no DI framework at this size). */
 class AssistantApp : Application() {
@@ -54,18 +60,31 @@ class AssistantApp : Application() {
     private val mcpClient by lazy { McpClient(config.gatewayUrls, auth) }
     val bundledCapabilities by lazy { BundledCapabilities(assets) }
     val capabilityCache: CapabilityCache by lazy { CapabilityCache(noBackupFilesDir, auth, mcpClient) }
-    private val remoteTools by lazy { RemoteTools(mcpClient) }
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val staleRefreshRunning = AtomicBoolean(false)
     private val symfonium by lazy { Symfonium(this) }
     private val speakerDirectory by lazy { SpeakerDirectory(this) }
 
     /**
-     * Tools for one session: those whose permissions are granted right now, so a skill that needs a
-     * missing one is left out (plan §4b). A remote tool with the same name replaces a local one only if
-     * the local one opts in with [allowRemote][com.mahasamuha.assistant.tools.Tool.allowRemote].
-     * [launch] starts an activity from the session, which must happen while it's visible; [closePanel]
-     * dismisses the session (after a call is placed). Remote tools come from the MCP server (plan §4b).
+     * The capabilities and tools for one session (plan §4b, phase 3.5), resolved at the first model
+     * request. The index is the fresh one if [indexRefresh] (started when the panel opened) has already
+     * completed, else the cached one, else only the bundled manifest; it never waits. A local tool is
+     * available when its permission is granted. [launch] starts an activity from the session, which must
+     * happen while it's visible; [closePanel] dismisses the session (after a call is placed).
      */
-    suspend fun sessionTools(launch: (Intent) -> Unit, closePanel: () -> Unit, keepPaused: () -> Unit): ToolRegistry {
+    suspend fun sessionCatalog(
+        indexRefresh: Deferred<Result<CachedIndex>>,
+        launch: (Intent) -> Unit,
+        closePanel: () -> Unit,
+        keepPaused: () -> Unit,
+    ): SessionCatalog {
+        val fresh = if (indexRefresh.isCompleted) indexRefresh.await().getOrNull() else null
+        val index = fresh ?: capabilityCache.current()
+        val source = when {
+            fresh != null -> "fresh"
+            index != null -> "cache (${index.ageMillis() / 60_000} min old)"
+            else -> "bundled"
+        }
         val contactsAllowed = granted(Manifest.permission.READ_CONTACTS)
         // Every local tool is built, with whether its permission is granted, so a local tool's name stays
         // reserved even in a session that leaves the tool out.
@@ -88,28 +107,34 @@ class AssistantApp : Application() {
             PlayMusicTool(symfonium, speakerDirectory, mcpClient, closePanel) to true,
             MusicControlTool(this, symfonium, speakerDirectory, closePanel, keepPaused) to true,
         )
-        val local = candidates.filter { (_, allowed) -> allowed }.map { (tool, _) -> tool }
-        val reserved = candidates.map { (tool, _) -> tool }.filterNot { it.allowRemote }.map { it.definition.name }.toSet()
+        // A server skill with the same name as a bundled one overrides it (plan §4b).
+        val serverSkills = index?.skills.orEmpty()
+        val skills = this.skills.filter { bundled -> serverSkills.none { it.name == bundled.name } } + serverSkills
+        return SessionCatalog.build(
+            candidates = candidates,
+            merged = CapabilityCatalog.merge(bundledCapabilities.capabilities, index),
+            skills = skills,
+            remoteTool = { definition -> remoteTool(definition, mcpClient, ::refreshIndexSoon) },
+            source = source,
+        )
+    }
 
-        // A remote tool replaces a local one of the same name; a read-only local one stays behind it as the fallback.
-        val localByName = local.associateBy { it.definition.name }
-        // Remote tools that a local tool calls itself never reach the model.
-        val privateNames = candidates.flatMap { (tool, _) -> tool.privateRemoteTools }.toSet()
-        val loaded = remoteTools.load()
-        val remote = loaded
-            .filter { it.definition.name !in privateNames }
-            .also { Log.i(TAG, "Kept ${loaded.size - it.size} remote tools private") }
-            .filter { tool ->
-                (tool.definition.name !in reserved).also { kept ->
-                    if (!kept) Log.w(TAG, "Ignoring remote ${tool.definition.name}: the local one doesn't allow a remote override")
-                }
+    /**
+     * Refreshes the capability index for a session that's opening. Runs in the app's scope, so closing the
+     * panel early doesn't cancel it: a refresh that lands too late still serves the next session.
+     */
+    fun startIndexRefresh(): Deferred<Result<CachedIndex>> = appScope.async { capabilityCache.refresh() }
+
+    /** A remote tool the server no longer has means the cached index is stale: refresh it for the next session. */
+    private fun refreshIndexSoon() {
+        if (!staleRefreshRunning.compareAndSet(false, true)) return
+        appScope.launch {
+            try {
+                capabilityCache.refresh()
+            } finally {
+                staleRefreshRunning.set(false)
             }
-            .map { tool ->
-                val shadowed = localByName[tool.definition.name]
-                if (tool is ReadOnlyTool && shadowed is ReadOnlyTool) FallbackTool(tool, shadowed) else tool
-            }
-        val remoteNames = remote.map { it.definition.name }.toSet()
-        return ToolRegistry(local.filter { it.definition.name !in remoteNames } + remote)
+        }
     }
 
     private fun granted(permission: String) = checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED

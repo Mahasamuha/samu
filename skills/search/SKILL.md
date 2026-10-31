@@ -2,7 +2,6 @@
 name: search
 description: Looking up anything current or changing on the web: news, scores, prices, opening hours.
 delivery: app
-tools: [web_search]
 capabilities: [search]
 ---
 - For anything current or changing (news, scores, prices, opening hours), use web search, unless another skill names a specific tool.

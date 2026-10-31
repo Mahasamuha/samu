@@ -147,7 +147,6 @@ class CapabilityCache(
                 Skill(
                     name = skill.getString("name"),
                     description = skill.optString("description"),
-                    tools = emptyList(),
                     capabilities = (0 until (attached?.length() ?: 0)).map { attached!!.getString(it) },
                     instructions = skill.optString("instructions"),
                 )

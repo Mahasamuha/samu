@@ -2,7 +2,6 @@
 name: clock
 description: Setting timers and alarms in the Clock app.
 delivery: app
-tools: [set_timer, set_alarm]
 capabilities: [clock]
 ---
 - "Set a timer" always means set_timer, and "set an alarm" always means set_alarm.

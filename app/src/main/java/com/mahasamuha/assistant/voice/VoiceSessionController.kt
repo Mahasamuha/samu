@@ -2,6 +2,7 @@ package com.mahasamuha.assistant.voice
 
 import android.app.KeyguardManager
 import android.security.keystore.UserNotAuthenticatedException
+import android.os.SystemClock
 import android.util.Log
 import com.mahasamuha.assistant.auth.AuthManager
 import com.mahasamuha.assistant.auth.NotSignedInException
@@ -12,7 +13,8 @@ import com.mahasamuha.assistant.llm.ChatMessage
 import com.mahasamuha.assistant.llm.ChatMessage.Role
 import com.mahasamuha.assistant.llm.ChatOptions
 import com.mahasamuha.assistant.llm.ToolCall
-import com.mahasamuha.assistant.skills.Skill
+import com.mahasamuha.assistant.capabilities.SessionCatalog
+import com.mahasamuha.assistant.capabilities.UseCapabilityTool
 import com.mahasamuha.assistant.tools.Confirmation
 import com.mahasamuha.assistant.tools.ConfirmationResult
 import com.mahasamuha.assistant.tools.ToolRegistry
@@ -86,8 +88,7 @@ class VoiceSessionController(
     private val scope: CoroutineScope,
     private val stt: SpeechToText,
     private val chat: ChatClient,
-    private val toolsLoading: Deferred<ToolRegistry>,
-    private val skills: List<Skill>,
+    private val catalogLoading: suspend () -> SessionCatalog,
     private val speaker: Speaker,
     private val locationSource: LocationSource,
     private val auth: AuthManager,
@@ -99,9 +100,8 @@ class VoiceSessionController(
 
     private val history = mutableListOf<ChatMessage>()
 
-    // Known from the first turn on: remote tools load while the user speaks.
+    // Known from the first turn on.
     private lateinit var tools: ToolRegistry
-    private var activeSkills = emptyList<Skill>()
     private var turn: Job? = null
 
     // Completed by a Confirm/Cancel tap while an action is being confirmed or announced.
@@ -159,11 +159,11 @@ class VoiceSessionController(
 
             val place = location.await()
             if (history.isEmpty()) {
-                tools = toolsLoading.await()
-                // A skill is only used when every tool it relies on is registered (plan §4b).
-                activeSkills = skills.filter { skill -> skill.tools.all { it in tools.names } }
-                Log.i(TAG, "Tools: ${tools.names.sorted().joinToString()}; skills: ${activeSkills.joinToString { it.name }.ifEmpty { "none" }} (of ${skills.size})")
-                history += ChatMessage(Role.SYSTEM, VoicePrompt.system(activeSkills, place))
+                // Resolved now, at the first model request, so a fresh index that landed while the user spoke counts.
+                val catalog = catalogLoading()
+                tools = catalog.registry
+                Log.i(TAG, "Tools: ${tools.names.sorted().joinToString()}")
+                history += ChatMessage(Role.SYSTEM, VoicePrompt.system(catalog.eagerSkills, catalog.lazyCapabilities, place))
             }
             val turnStart = history.size
             history += ChatMessage(Role.USER, heard)
@@ -221,10 +221,11 @@ class VoiceSessionController(
      * history; returns all spoken text.
      */
     private suspend fun respond(): String {
-        val options = ChatOptions(tools = tools.definitions)
         val spoken = StringBuilder()
         // Pages from this turn's searches, shown with the next reply bubble (the answer after the search).
         var sources = emptyList<SourceLink>()
+        // When a round called use_capability: the clock time then, to log how long the extra round took to start.
+        var bindRequestedAt: Long? = null
         repeat(MAX_ROUNDS) {
             val splitter = SentenceSplitter()
             val text = StringBuilder()
@@ -233,7 +234,13 @@ class VoiceSessionController(
             var bubble: Int? = null // this round's reply bubble in the transcript
             // v1 calls the LLM only while unlocked (plan §2); the phone may have locked during the last round.
             if (keyguard.isDeviceLocked) throw UserFacingException("Unlock your phone first.")
+            // Per round, since use_capability adds tools: those bound in this round are sent in the next.
+            val options = ChatOptions(tools = tools.definitions)
             chat.stream(history.toList(), options).collect { event ->
+                bindRequestedAt?.let { requested ->
+                    Log.i(TAG, "Round after use_capability began streaming ${SystemClock.elapsedRealtime() - requested} ms after the bind request")
+                    bindRequestedAt = null
+                }
                 when (event) {
                     is ChatEvent.Text -> {
                         val started = text.isNotBlank()
@@ -267,6 +274,7 @@ class VoiceSessionController(
             }
             if (calls.isEmpty()) return spoken.toString().trim()
 
+            if (calls.any { it.name == UseCapabilityTool.NAME }) bindRequestedAt = SystemClock.elapsedRealtime()
             for (call in calls) {
                 _state.update { it.copy(phase = PanelState.Phase.Thinking) }
                 val result = tools.execute(call, ::confirm)

@@ -8,14 +8,15 @@ import com.mahasamuha.assistant.voice.TAG
 data class Skill(
     val name: String,
     val description: String,
-    /** Tools it relies on; the skill is only used when all of them are available. */
-    val tools: List<String>,
     /** Capabilities it attaches to (capabilities/README.md); empty for an instruction-only skill. */
     val capabilities: List<String> = emptyList(),
     val instructions: String,
 ) {
+    /** The skill as the model reads it, in the system prompt or a capability bind result. */
+    fun asPromptSection() = "## Skill: $name\n$description\n\n$instructions"
+
     companion object {
-        /** Parses YAML frontmatter (a `key: value` subset, `tools` and `capabilities` as `[a, b]`) followed by the instructions. */
+        /** Parses YAML frontmatter (a `key: value` subset, `capabilities` as `[a, b]`) followed by the instructions. */
         fun parse(text: String): Skill {
             val normalized = text.replace("\r\n", "\n")
             require(normalized.startsWith("---\n")) { "SKILL.md must start with frontmatter" }
@@ -25,13 +26,12 @@ data class Skill(
             val fields = normalized.substring(4, end).lines()
                 .mapNotNull { line -> line.split(":", limit = 2).takeIf { it.size == 2 }?.let { (k, v) -> k.trim() to v.trim() } }
                 .toMap()
-            fun list(key: String) = fields[key]?.removeSurrounding("[", "]")?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+            val capabilities = fields["capabilities"]?.removeSurrounding("[", "]")?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
 
             return Skill(
                 name = requireNotNull(fields["name"]?.takeIf { it.isNotEmpty() }) { "SKILL.md needs a name" },
                 description = fields["description"].orEmpty(),
-                tools = list("tools"),
-                capabilities = list("capabilities"),
+                capabilities = capabilities,
                 instructions = normalized.substring(end + 4).trim(),
             )
         }

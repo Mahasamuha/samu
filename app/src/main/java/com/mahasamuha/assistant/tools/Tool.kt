@@ -75,21 +75,31 @@ fun interface Confirmer {
     suspend fun confirm(confirmation: Confirmation): ConfirmationResult
 }
 
-class ToolRegistry(tools: List<Tool>) {
+class ToolRegistry(tools: List<Tool> = emptyList()) {
+    private val byName = LinkedHashMap<String, Tool>()
+
     init {
         require(tools.map { it.definition.name }.toSet().size == tools.size) { "Tool names must be unique" }
-        for (tool in tools) {
-            require((tool is ReadOnlyTool) == tool.definition.annotations.readOnlyHint) {
-                "${tool.definition.name}: readOnlyHint must be set exactly for read-only tools"
-            }
-        }
+        tools.forEach(::add)
     }
 
-    private val byName = tools.associateBy { it.definition.name }
+    /** What the model may call right now; grows as capabilities are bound, so read it once per model round. */
+    val definitions: List<ToolDefinition> get() = byName.values.map { it.definition }
 
-    val definitions: List<ToolDefinition> = tools.map { it.definition }
+    val names: Set<String> get() = byName.keys.toSet()
 
-    val names: Set<String> = byName.keys
+    /** Adds tools to the live registry (late binding). A name that is already bound is skipped. */
+    fun bind(tools: List<Tool>) {
+        require(tools.map { it.definition.name }.toSet().size == tools.size) { "Tool names must be unique" }
+        tools.filter { it.definition.name !in byName }.forEach(::add)
+    }
+
+    private fun add(tool: Tool) {
+        require((tool is ReadOnlyTool) == tool.definition.annotations.readOnlyHint) {
+            "${tool.definition.name}: readOnlyHint must be set exactly for read-only tools"
+        }
+        byName[tool.definition.name] = tool
+    }
 
     /**
      * Set once a read-only `openWorldHint` tool has run (web search, weather). Its results are text from
@@ -99,7 +109,7 @@ class ToolRegistry(tools: List<Tool>) {
 
     /** Never throws (except cancellation): failures become an error result the model can explain. */
     suspend fun execute(call: ToolCall, confirmer: Confirmer): String {
-        val tool = byName[call.name] ?: return error("Unknown tool ${call.name}")
+        val tool = byName[call.name] ?: return error("Unknown tool ${call.name}. If it belongs to a capability listed under Capabilities, call use_capability first.")
         val arguments = try {
             JSONObject(call.arguments.ifBlank { "{}" })
         } catch (e: JSONException) {

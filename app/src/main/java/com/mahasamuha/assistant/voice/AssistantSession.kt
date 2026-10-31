@@ -23,7 +23,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -83,14 +82,17 @@ class AssistantSession(context: Context) :
 
         val app = context.applicationContext as AssistantApp
         speaker = PlatformSpeaker(context, app.voicePreference.name)
+        // Races speech recognition: the session uses the fresh index only if it lands first.
+        val indexRefresh = app.startIndexRefresh()
         controller = VoiceSessionController(
             scope = lifecycleScope,
             stt = PlatformSpeechToText(context),
             chat = app.chatClient,
             // From the session's own context while the panel is up; Android 17 blocks background launches.
-            // Loads while the user speaks; the remote list comes from the MCP server.
-            toolsLoading = lifecycleScope.async {
-                app.sessionTools(
+            // Resolved at the first model request; the index refresh runs while the user speaks.
+            catalogLoading = {
+                app.sessionCatalog(
+                    indexRefresh = indexRefresh,
                     launch = { intent -> context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) },
                     // No more model rounds, but after any speech in progress, so a reported action's line
                     // ("Timer, 10 minutes") isn't cut off.
@@ -101,7 +103,6 @@ class AssistantSession(context: Context) :
                     keepPaused = { keepOthersPaused = true },
                 )
             },
-            skills = app.skills,
             speaker = speaker,
             locationSource = app.locationSource,
             auth = app.auth,

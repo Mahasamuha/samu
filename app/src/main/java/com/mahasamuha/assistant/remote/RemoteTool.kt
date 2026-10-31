@@ -9,34 +9,22 @@ import com.mahasamuha.assistant.tools.ReadOnlyTool
 import com.mahasamuha.assistant.tools.Tool
 import com.mahasamuha.assistant.voice.TAG
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 
 /**
- * Tools served by the MCP server (plan §4b). The list is fetched at session start, while the user is still
- * speaking; if the server is slow or down, the last list fetched is used, or none.
+ * A tool served by the MCP server (plan §4b), from its definition in the capability index. The call goes
+ * through [client]; [onStale] runs when the server doesn't know the tool, i.e. the index is out of date.
  */
-class RemoteTools(private val client: McpClient) {
-    @Volatile private var cached: List<ToolDefinition>? = null
+fun remoteTool(definition: ToolDefinition, client: McpClient, onStale: () -> Unit): Tool =
+    if (definition.annotations.readOnlyHint) RemoteReadOnlyTool(definition, client, onStale) else RemoteActionTool(definition, client, onStale)
 
-    suspend fun load(): List<Tool> {
-        val definitions = try {
-            withTimeoutOrNull(FETCH_TIMEOUT_MS) { client.listTools() }?.also { cached = it }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Log.w(TAG, "Remote tools unavailable", e)
-            null
-        } ?: cached.orEmpty()
-        // Unique names: the registry rejects duplicates, which would leave the session with no tools.
-        return definitions.distinctBy { it.name }.map { definition ->
-            if (definition.annotations.readOnlyHint) RemoteReadOnlyTool(definition, client) else RemoteActionTool(definition, client)
-        }
-    }
-
-    private companion object {
-        const val FETCH_TIMEOUT_MS = 4_000L
-    }
+/** Calls the tool, reporting a stale index before the failure goes to the model. */
+private suspend fun call(client: McpClient, definition: ToolDefinition, arguments: JSONObject, onStale: () -> Unit): String = try {
+    client.callTool(definition.name, arguments)
+} catch (e: McpUnknownToolException) {
+    Log.w(TAG, "Server doesn't know ${definition.name}; the capability index is stale")
+    onStale()
+    throw e
 }
 
 /**
@@ -56,19 +44,27 @@ class FallbackTool(private val remote: ReadOnlyTool, private val local: ReadOnly
     }
 }
 
-private class RemoteReadOnlyTool(override val definition: ToolDefinition, private val client: McpClient) : ReadOnlyTool {
-    override suspend fun run(arguments: JSONObject): String = client.callTool(definition.name, arguments)
+private class RemoteReadOnlyTool(
+    override val definition: ToolDefinition,
+    private val client: McpClient,
+    private val onStale: () -> Unit,
+) : ReadOnlyTool {
+    override suspend fun run(arguments: JSONObject): String = call(client, definition, arguments, onStale)
 }
 
 /**
  * A remote tool with side effects always asks first (plan §4b): the phone has no tool-specific read-back
  * for it, so the question names the tool and its arguments.
  */
-private class RemoteActionTool(override val definition: ToolDefinition, private val client: McpClient) : ActionTool {
+private class RemoteActionTool(
+    override val definition: ToolDefinition,
+    private val client: McpClient,
+    private val onStale: () -> Unit,
+) : ActionTool {
     override suspend fun prepare(arguments: JSONObject): PendingAction {
         val name = definition.annotations.title ?: definition.name.replace('_', ' ')
         val details = arguments.keys().asSequence().joinToString(", ") { key -> "$key ${arguments.opt(key)}" }
         val question = if (details.isEmpty()) "Run $name?" else "Run $name with $details?"
-        return PendingAction(Confirmation.Ask(question)) { client.callTool(definition.name, arguments) }
+        return PendingAction(Confirmation.Ask(question)) { call(client, definition, arguments, onStale) }
     }
 }
