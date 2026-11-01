@@ -34,12 +34,8 @@ export class TokenVerifier {
         requiredClaims: ["exp", "sub"],
       }));
     } catch (e) {
-      if (e instanceof errors.JWKSTimeout || e instanceof errors.JWKSInvalid) {
-        throw new HttpError(503, "Identity provider unavailable");
-      }
-      if (e instanceof errors.JOSEError) {
-        throw invalidToken();
-      }
+      if (isIdentityProviderFailure(e)) throw new HttpError(503, "Identity provider unavailable");
+      if (e instanceof errors.JOSEError) throw invalidToken();
       throw e;
     }
 
@@ -69,6 +65,20 @@ export class TokenVerifier {
     if (typeof document.jwks_uri !== "string") throw new Error("discovery document has no jwks_uri");
     return document.jwks_uri;
   }
+}
+
+/**
+ * True when verification failed because the key set could not be fetched, not because of the token.
+ * - JWKSTimeout / JWKSInvalid: jose's own classes for a slow or malformed key set.
+ * - A bare JOSEError (code ERR_JOSE_GENERIC): jose throws this class directly only for a non-200 or non-JSON
+ *   key set response (jwks/remote.js); every token problem uses a more specific subclass.
+ * - A TypeError carrying a `cause`: how fetch reports a network failure (refused, DNS, reset). jose's own
+ *   TypeErrors (bad options) have no cause, so programming errors still surface as 500.
+ */
+function isIdentityProviderFailure(e: unknown): boolean {
+  if (e instanceof errors.JWKSTimeout || e instanceof errors.JWKSInvalid) return true;
+  if (e instanceof errors.JOSEError) return e.code === "ERR_JOSE_GENERIC";
+  return e instanceof TypeError && e.cause != null;
 }
 
 function invalidToken(): HttpError {
