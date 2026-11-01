@@ -71,7 +71,7 @@ class CapabilityCache(
         return try {
             val principal = auth.principal() ?: throw NotSignedInException()
             val text = client.readResource(INDEX_URI)
-            val fresh = withContext(Dispatchers.IO) { parse(text, principal, System.currentTimeMillis(), IndexSource.FRESH) }
+            val fresh = withContext(Dispatchers.IO) { parseCapabilityIndex(text, principal, System.currentTimeMillis(), IndexSource.FRESH) }
             // Sign-out or a switch of principal during the fetch must not leave this index behind.
             val stillSame = auth.principal() == principal
             withContext(Dispatchers.IO) {
@@ -105,7 +105,7 @@ class CapabilityCache(
         if (!file.baseFile.exists()) return null
         return try {
             val stored = JSONObject(String(file.readFully(), Charsets.UTF_8))
-            parse(stored.getString("index"), stored.getString("principal"), stored.getLong("fetchedAt"), IndexSource.CACHE)
+            parseCapabilityIndex(stored.getString("index"), stored.getString("principal"), stored.getLong("fetchedAt"), IndexSource.CACHE)
         } catch (e: Exception) {
             Log.w(TAG, "Dropping unreadable capability cache", e)
             file.delete()
@@ -129,44 +129,46 @@ class CapabilityCache(
         }
     }
 
-    private fun parse(text: String, principal: String, fetchedAt: Long, source: IndexSource): CachedIndex {
-        val json = JSONObject(text)
-        val version = json.optInt("version")
-        if (version != SUPPORTED_VERSION) throw IllegalStateException("Unsupported capability index version $version")
-        val tools = json.optJSONArray("tools")
-        val skills = json.optJSONArray("skills")
-        return CachedIndex(
-            principal = principal,
-            fetchedAtMillis = fetchedAt,
-            source = source,
-            capabilities = Capability.parseAll(json.getJSONArray("capabilities")),
-            tools = tools?.let { parseEntries(it, "tool", IndexLimits.MAX_TOOL_DEFINITIONS, ::parseTool) }.orEmpty(),
-            skills = skills?.let { parseEntries(it, "skill", IndexLimits.MAX_SKILLS, ::parseSkill) }.orEmpty(),
-        )
-    }
-
-    private fun parseTool(entry: JSONObject): ToolDefinition {
-        val tool = toolDefinition(entry)
-        IndexLimits.checkLength("description", tool.description, IndexLimits.MAX_TOOL_DESCRIPTION)
-        IndexLimits.checkLength("inputSchema", tool.inputSchema.toString(), IndexLimits.MAX_INPUT_SCHEMA)
-        return tool
-    }
-
-    private fun parseSkill(entry: JSONObject): Skill {
-        val attached = entry.optJSONArray("capabilities")
-        val skill = Skill(
-            name = entry.getString("name"),
-            description = entry.optString("description"),
-            capabilities = (0 until (attached?.length() ?: 0)).map { attached!!.getString(it) },
-            instructions = entry.optString("instructions"),
-        )
-        IndexLimits.checkLength("description", skill.description, IndexLimits.MAX_SKILL_DESCRIPTION)
-        IndexLimits.checkLength("instructions", skill.instructions, IndexLimits.MAX_SKILL_INSTRUCTIONS)
-        return skill
-    }
-
     private companion object {
         const val INDEX_URI = "capability://index"
-        const val SUPPORTED_VERSION = 1
     }
+}
+
+private const val SUPPORTED_VERSION = 1
+
+/** Parses and validates a `capability://index` document (version, per-entry limits); throws when the document as a whole is unusable. */
+internal fun parseCapabilityIndex(text: String, principal: String, fetchedAt: Long, source: IndexSource): CachedIndex {
+    val json = JSONObject(text)
+    val version = json.optInt("version")
+    if (version != SUPPORTED_VERSION) throw IllegalStateException("Unsupported capability index version $version")
+    val tools = json.optJSONArray("tools")
+    val skills = json.optJSONArray("skills")
+    return CachedIndex(
+        principal = principal,
+        fetchedAtMillis = fetchedAt,
+        source = source,
+        capabilities = Capability.parseAll(json.getJSONArray("capabilities")),
+        tools = tools?.let { parseEntries(it, "tool", IndexLimits.MAX_TOOL_DEFINITIONS, ::parseTool) }.orEmpty(),
+        skills = skills?.let { parseEntries(it, "skill", IndexLimits.MAX_SKILLS, ::parseSkill) }.orEmpty(),
+    )
+}
+
+private fun parseTool(entry: JSONObject): ToolDefinition {
+    val tool = toolDefinition(entry)
+    IndexLimits.checkLength("description", tool.description, IndexLimits.MAX_TOOL_DESCRIPTION)
+    IndexLimits.checkLength("inputSchema", tool.inputSchema.toString(), IndexLimits.MAX_INPUT_SCHEMA)
+    return tool
+}
+
+private fun parseSkill(entry: JSONObject): Skill {
+    val attached = entry.optJSONArray("capabilities")
+    val skill = Skill(
+        name = entry.getString("name"),
+        description = entry.optString("description"),
+        capabilities = (0 until (attached?.length() ?: 0)).map { attached!!.getString(it) },
+        instructions = entry.optString("instructions"),
+    )
+    IndexLimits.checkLength("description", skill.description, IndexLimits.MAX_SKILL_DESCRIPTION)
+    IndexLimits.checkLength("instructions", skill.instructions, IndexLimits.MAX_SKILL_INSTRUCTIONS)
+    return skill
 }

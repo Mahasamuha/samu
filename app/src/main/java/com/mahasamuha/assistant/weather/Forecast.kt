@@ -23,3 +23,9 @@ data class Forecast(
     data class Day(val date: LocalDate, val high: Double, val low: Double, val condition: String, val precipitationChance: Int?)
 }
 
+
+/**
+ * Where [WeatherTool] gets forecasts; [OpenMeteoWeather.forecast] is the real one. Returns current
+ * conditions, and hourly and daily forecasts for `days` days starting today.
+ */
+typealias ForecastFetch = suspend (latitude: Double, longitude: Double, units: Units, days: Int) -> Forecast

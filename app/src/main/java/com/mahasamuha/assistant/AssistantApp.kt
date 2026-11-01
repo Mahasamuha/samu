@@ -1,9 +1,12 @@
 package com.mahasamuha.assistant
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Application
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Bundle
 import android.telecom.TelecomManager
 import android.telephony.TelephonyManager
 import com.mahasamuha.assistant.auth.AuthManager
@@ -35,6 +38,7 @@ import com.mahasamuha.assistant.voice.TAG
 import com.mahasamuha.assistant.voice.LocationSource
 import com.mahasamuha.assistant.voice.PlatformLocationSource
 import com.mahasamuha.assistant.voice.VoicePreference
+import com.mahasamuha.assistant.skills.mergeSkills
 import com.mahasamuha.assistant.weather.OpenMeteoWeather
 import com.mahasamuha.assistant.weather.WeatherTool
 import java.util.concurrent.atomic.AtomicBoolean
@@ -54,7 +58,7 @@ class AssistantApp : Application() {
     val savedPlaces by lazy { SavedPlaces(this) }
     val voicePreference by lazy { VoicePreference(this) }
 
-    private val weatherTool by lazy { WeatherTool(OpenMeteoWeather(), locationSource) }
+    private val weatherTool by lazy { WeatherTool(OpenMeteoWeather()::forecast, locationSource) }
     private val contacts by lazy { ContactDirectory(contentResolver, resources) }
     private val smsSender by lazy { SmsSender(this) }
     private val mcpClient by lazy { McpClient(config.gatewayUrls, auth) }
@@ -86,18 +90,20 @@ class AssistantApp : Application() {
             else -> "bundled"
         }
         val contactsAllowed = granted(Manifest.permission.READ_CONTACTS)
+        val telecom = getSystemService(TelecomManager::class.java)
         // Every local tool is built, with whether its permission is granted, so a local tool's name stays
         // reserved even in a session that leaves the tool out.
         val candidates = listOf(
             weatherTool to true,
             FindContactTool(contacts) to contactsAllowed,
-            SendSmsTool(smsSender, contacts.takeIf { contactsAllowed }) to granted(Manifest.permission.SEND_SMS),
+            SendSmsTool(smsSender::send, contacts.takeIf { contactsAllowed }) to granted(Manifest.permission.SEND_SMS),
             PlaceCallTool(
                 contacts.takeIf { contactsAllowed },
-                getSystemService(TelephonyManager::class.java),
-                getSystemService(TelecomManager::class.java),
                 launch,
                 closePanel,
+                isEmergencyNumber = getSystemService(TelephonyManager::class.java)::isEmergencyNumber,
+                defaultDialerPackage = { telecom.defaultDialerPackage },
+                placeCall = { number -> placeCall(telecom, Uri.fromParts("tel", number, null)) },
             ) to granted(Manifest.permission.CALL_PHONE),
             NavigateTool(this, savedPlaces, contacts.takeIf { contactsAllowed }, launch, closePanel) to true,
             // SET_ALARM is a normal permission, granted at install.
@@ -108,13 +114,12 @@ class AssistantApp : Application() {
             MusicControlTool(this, symfonium, speakerDirectory, closePanel, keepPaused) to true,
         )
         // A server skill with the same name as a bundled one overrides it (plan §4b).
-        val serverSkills = index?.skills.orEmpty()
-        val skills = this.skills.filter { bundled -> serverSkills.none { it.name == bundled.name } } + serverSkills
+        val skills = mergeSkills(this.skills, index?.skills.orEmpty())
         return SessionCatalog.build(
             candidates = candidates,
             merged = CapabilityCatalog.merge(bundledCapabilities.capabilities, index),
             skills = skills,
-            remoteTool = { definition -> remoteTool(definition, mcpClient, ::refreshIndexSoon) },
+            remoteTool = { definition -> remoteTool(definition, mcpClient::callTool, ::refreshIndexSoon) },
             source = source,
         )
     }
@@ -139,4 +144,8 @@ class AssistantApp : Application() {
 
     private fun granted(permission: String) = checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
     val skills by lazy { BundledSkills(assets).load() }
+
+    // Only registered while CALL_PHONE is granted (sessionCatalog).
+    @SuppressLint("MissingPermission")
+    private fun placeCall(telecom: TelecomManager, uri: Uri) = telecom.placeCall(uri, Bundle())
 }

@@ -175,67 +175,67 @@ class SpeakerDirectory(context: Context) {
         return out.toByteArray()
     }
 
-    /** The body of a raw HTTP response, de-chunked when needed. Throws on a non-200 status. */
-    private fun httpBody(raw: ByteArray): String {
-        val separator = byteArrayOf(13, 10, 13, 10)
-        val split = indexOf(raw, separator)
-        check(split >= 0) { "Malformed speaker response" }
-        val headers = String(raw, 0, split, Charsets.ISO_8859_1)
-        val status = headers.lineSequence().first().split(' ').getOrNull(1)
-        check(status == "200") { "Speaker request failed: HTTP $status" }
-        var body = raw.copyOfRange(split + 4, raw.size)
-        if (headers.contains("transfer-encoding: chunked", ignoreCase = true)) body = dechunk(body)
-        return String(body, Charsets.UTF_8)
-    }
-
-    private fun dechunk(data: ByteArray): ByteArray {
-        val out = ByteArrayOutputStream()
-        var pos = 0
-        while (pos < data.size) {
-            val lineEnd = indexOf(data, byteArrayOf(13, 10), pos)
-            if (lineEnd < 0) break
-            val size = String(data, pos, lineEnd - pos, Charsets.ISO_8859_1).substringBefore(';').trim().toIntOrNull(16) ?: break
-            if (size == 0) break
-            val start = lineEnd + 2
-            val end = minOf(start + size, data.size)
-            out.write(data, start, end - start)
-            pos = end + 2
-        }
-        return out.toByteArray()
-    }
-
-    private fun indexOf(data: ByteArray, pattern: ByteArray, from: Int = 0): Int {
-        for (i in from..data.size - pattern.size) {
-            if (pattern.indices.all { data[i + it] == pattern[it] }) return i
-        }
-        return -1
-    }
-
-    /** One CastSpeaker per Sonos group, skipping invisible members (bonded satellites, etc.). */
-    private fun parseZoneGroups(soapBody: String): List<CastSpeaker> {
-        val state = unescape(soapBody.substringAfter("<ZoneGroupState>", "").substringBefore("</ZoneGroupState>"))
-        check(state.isNotEmpty()) { "Speaker response had no zone groups" }
-        return GROUP_REGEX.findAll(state).mapNotNull { group ->
-            val coordinator = attributes(group.groupValues[1])["Coordinator"] ?: return@mapNotNull null
-            val members = MEMBER_REGEX.findAll(group.groupValues[2])
-                .map { attributes(it.groupValues[1]) }
-                .filter { it["Invisible"] != "1" && !it["ZoneName"].isNullOrBlank() }
-                .toList()
-            // Named as the Sonos app does: by the coordinator; the other members are aliases.
-            val lead = members.firstOrNull { it["UUID"] == coordinator } ?: members.firstOrNull() ?: return@mapNotNull null
-            val name = lead.getValue("ZoneName")
-            val aliases = members.map { it.getValue("ZoneName") }.distinct().filter { it != name }.sorted()
-            CastSpeaker(name, UPNP, "${coordinator}_MR", aliases)
-        }.toList()
-    }
-
-    private fun attributes(tag: String): Map<String, String> =
-        ATTRIBUTE_REGEX.findAll(tag).associate { it.groupValues[1] to unescape(it.groupValues[2]) }
-
-    private fun unescape(s: String) = s
-        .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
-
     companion object {
+        /** The body of a raw HTTP response, de-chunked when needed. Throws on a non-200 status. */
+        internal fun httpBody(raw: ByteArray): String {
+            val separator = byteArrayOf(13, 10, 13, 10)
+            val split = indexOf(raw, separator)
+            check(split >= 0) { "Malformed speaker response" }
+            val headers = String(raw, 0, split, Charsets.ISO_8859_1)
+            val status = headers.lineSequence().first().split(' ').getOrNull(1)
+            check(status == "200") { "Speaker request failed: HTTP $status" }
+            var body = raw.copyOfRange(split + 4, raw.size)
+            if (headers.contains("transfer-encoding: chunked", ignoreCase = true)) body = dechunk(body)
+            return String(body, Charsets.UTF_8)
+        }
+
+        private fun dechunk(data: ByteArray): ByteArray {
+            val out = ByteArrayOutputStream()
+            var pos = 0
+            while (pos < data.size) {
+                val lineEnd = indexOf(data, byteArrayOf(13, 10), pos)
+                if (lineEnd < 0) break
+                val size = String(data, pos, lineEnd - pos, Charsets.ISO_8859_1).substringBefore(';').trim().toIntOrNull(16) ?: break
+                if (size == 0) break
+                val start = lineEnd + 2
+                val end = minOf(start + size, data.size)
+                out.write(data, start, end - start)
+                pos = end + 2
+            }
+            return out.toByteArray()
+        }
+
+        private fun indexOf(data: ByteArray, pattern: ByteArray, from: Int = 0): Int {
+            for (i in from..data.size - pattern.size) {
+                if (pattern.indices.all { data[i + it] == pattern[it] }) return i
+            }
+            return -1
+        }
+
+        /** One CastSpeaker per Sonos group, skipping invisible members (bonded satellites, etc.). */
+        internal fun parseZoneGroups(soapBody: String): List<CastSpeaker> {
+            val state = unescape(soapBody.substringAfter("<ZoneGroupState>", "").substringBefore("</ZoneGroupState>"))
+            check(state.isNotEmpty()) { "Speaker response had no zone groups" }
+            return GROUP_REGEX.findAll(state).mapNotNull { group ->
+                val coordinator = attributes(group.groupValues[1])["Coordinator"] ?: return@mapNotNull null
+                val members = MEMBER_REGEX.findAll(group.groupValues[2])
+                    .map { attributes(it.groupValues[1]) }
+                    .filter { it["Invisible"] != "1" && !it["ZoneName"].isNullOrBlank() }
+                    .toList()
+                // Named as the Sonos app does: by the coordinator; the other members are aliases.
+                val lead = members.firstOrNull { it["UUID"] == coordinator } ?: members.firstOrNull() ?: return@mapNotNull null
+                val name = lead.getValue("ZoneName")
+                val aliases = members.map { it.getValue("ZoneName") }.distinct().filter { it != name }.sorted()
+                CastSpeaker(name, UPNP, "${coordinator}_MR", aliases)
+            }.toList()
+        }
+
+        private fun attributes(tag: String): Map<String, String> =
+            ATTRIBUTE_REGEX.findAll(tag).associate { it.groupValues[1] to unescape(it.groupValues[2]) }
+
+        private fun unescape(s: String) = s
+            .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
+
         /** Symfonium renderer type for UPnP (Sonos). */
         const val UPNP = 1
 

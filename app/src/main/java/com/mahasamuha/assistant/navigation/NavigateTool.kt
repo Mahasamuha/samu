@@ -79,14 +79,7 @@ class NavigateTool(
 
         val (where, query) = when {
             contactName.isNotEmpty() -> contactAddress(contactName, destination)
-            else -> places.address(destination)?.let { address -> spokenPlace(destination) to address }
-                ?: run {
-                    require(destination.lowercase() !in setOf(SavedPlaces.HOME, SavedPlaces.WORK)) {
-                        "The user's ${destination.lowercase()} address isn't set. They can add it in the Samu app."
-                    }
-                    require(destination.isNotEmpty()) { "A destination is required" }
-                    "to $destination" to destination
-                }
+            else -> resolvePlace(destination, places)
         }
         require(app.intent(query).resolveActivity(context.packageManager) != null) { "${app.spoken} isn't installed" }
         val locationOn = context.getSystemService(LocationManager::class.java).isLocationEnabled
@@ -98,9 +91,6 @@ class NavigateTool(
         }
     }
 
-    /** "home", "to work": how the announcement names a saved place. */
-    private fun spokenPlace(place: String) = if (place.lowercase() == SavedPlaces.HOME) "home" else "to work"
-
     /**
      * The contact's address for the announcement and the maps app. With several, [type] ("work") picks one;
      * otherwise the model is told the types to ask about, never the addresses.
@@ -109,11 +99,33 @@ class NavigateTool(
         requireNotNull(contacts) { "Contacts permission is off" }
         val addresses = contacts.addressesFor(name)
         require(addresses.isNotEmpty()) { "No address is saved for $name" }
-        val chosen: PostalAddress = addresses.singleOrNull()
-            ?: addresses.filter { type.isNotEmpty() && it.label.equals(type, ignoreCase = true) }.singleOrNull()
-            ?: throw IllegalArgumentException(
-                "$name has more than one address (${addresses.joinToString(", ") { it.label.lowercase() }}); ask which one",
-            )
-        return "to $name's ${chosen.label.lowercase()} address" to chosen.address
+        return chooseAddress(name, addresses, type)
     }
+}
+
+/**
+ * How the announcement names the destination, and what the maps app is given, for a destination that is
+ * not a contact's: "home" or "work" resolve to the saved address, anything else goes as said.
+ */
+internal fun resolvePlace(destination: String, places: SavedPlaces): Pair<String, String> =
+    places.address(destination)?.let { address -> spokenPlace(destination) to address }
+        ?: run {
+            require(destination.lowercase() !in setOf(SavedPlaces.HOME, SavedPlaces.WORK)) {
+                "The user's ${destination.lowercase()} address isn't set. They can add it in the Samu app."
+            }
+            require(destination.isNotEmpty()) { "A destination is required" }
+            "to $destination" to destination
+        }
+
+/** "home", "to work": how the announcement names a saved place. */
+private fun spokenPlace(place: String) = if (place.lowercase() == SavedPlaces.HOME) "home" else "to work"
+
+/** The one of [addresses] to use: the only one, else the one labelled [type]; throws, naming the labels, when it's still unclear. */
+internal fun chooseAddress(name: String, addresses: List<PostalAddress>, type: String): Pair<String, String> {
+    val chosen: PostalAddress = addresses.singleOrNull()
+        ?: addresses.filter { type.isNotEmpty() && it.label.equals(type, ignoreCase = true) }.singleOrNull()
+        ?: throw IllegalArgumentException(
+            "$name has more than one address (${addresses.joinToString(", ") { it.label.lowercase() }}); ask which one",
+        )
+    return "to $name's ${chosen.label.lowercase()} address" to chosen.address
 }

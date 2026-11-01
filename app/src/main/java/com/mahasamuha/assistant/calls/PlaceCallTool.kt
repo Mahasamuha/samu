@@ -1,11 +1,8 @@
 package com.mahasamuha.assistant.calls
 
-import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
-import android.os.Bundle
-import android.telecom.TelecomManager
-import android.telephony.TelephonyManager
+import com.mahasamuha.assistant.contacts.Contact
 import com.mahasamuha.assistant.contacts.ContactDirectory
 import com.mahasamuha.assistant.contacts.PhoneNumber
 import com.mahasamuha.assistant.contacts.Recipient
@@ -23,18 +20,21 @@ import org.json.JSONObject
  * contact dials the contact's saved number, never the model's text. The registry turns an announcement
  * into a question once the session has read outside content (search results).
  *
- * Calls go through [TelecomManager.placeCall], not an ACTION_CALL activity: with more than one app
+ * Calls go through `TelecomManager.placeCall` (wired in as [placeCall]), not an ACTION_CALL activity: with more than one app
  * handling ACTION_CALL, the activity resolved to a chooser that opened behind the panel (on-device
  * test). [launch] starts an activity from the session while it's visible (only the emergency dialer
  * now); [closePanel] dismisses the session once the call screen takes over. [contacts] is null when
- * contacts permission is off.
+ * contacts permission is off. [isEmergencyNumber] is the platform's emergency-number check;
+ * [defaultDialerPackage] is read when the emergency dialer opens, not at construction; [placeCall]
+ * starts a call to a number (the wiring builds the `tel:` Uri, which JVM tests can't) and needs CALL_PHONE (the tool is only registered while it is granted).
  */
 class PlaceCallTool(
     private val contacts: ContactDirectory?,
-    private val telephony: TelephonyManager,
-    private val telecom: TelecomManager,
     private val launch: (Intent) -> Unit,
     private val closePanel: () -> Unit,
+    private val isEmergencyNumber: (String) -> Boolean,
+    private val defaultDialerPackage: () -> String?,
+    private val placeCall: (String) -> Unit,
 ) : ActionTool {
 
     override val definition = ToolDefinition(
@@ -64,11 +64,11 @@ class PlaceCallTool(
         // Apps can't place emergency calls directly; open the default dialer with the number so the user presses call.
         // Checked on digits only, since "9 1 1" passes the plain-number check.
         val digits = number.filter { it.isDigit() || it == '+' }
-        if (telephony.isEmergencyNumber(digits)) {
+        if (isEmergencyNumber(digits)) {
             // Formatted, so it's read as a phone number rather than one large number ("five million…").
             val spoken = ContactDirectory.formatNumber(digits)
             return PendingAction(Confirmation.Announce("Opening the dialer for $spoken.", "Open the dialer for $spoken?")) {
-                launch(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", digits, null)).setPackage(telecom.defaultDialerPackage))
+                launch(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", digits, null)).setPackage(defaultDialerPackage()))
                 closePanel()
                 JSONObject().put("status", "dialer_opened").put("note", "The user presses call in the dialer").toString()
             }
@@ -92,12 +92,6 @@ class PlaceCallTool(
         }
     }
 
-    // Only registered while CALL_PHONE is granted (AssistantApp.sessionCatalog).
-    @SuppressLint("MissingPermission")
-    private fun placeCall(number: String) {
-        telecom.placeCall(Uri.fromParts("tel", number, null), Bundle())
-    }
-
     /**
      * The contact name and its saved number when certain: [name] matches exactly one contact, [number] is one
      * of its numbers, and no other number of that contact has the same type (plan §5a). Null otherwise.
@@ -105,7 +99,19 @@ class PlaceCallTool(
     private suspend fun certainMatch(name: String, number: String): Pair<String, PhoneNumber>? {
         if (contacts == null || name.isEmpty()) return null
         val contact = contacts.find(name).singleOrNull() ?: return null
-        val chosen = contact.numbers.firstOrNull { ContactDirectory.sameNumber(it.number, number) } ?: return null
-        return if (contact.numbers.count { it.label == chosen.label } == 1) contact.name to chosen else null
+        return certainNumber(contact, number)?.let { contact.name to it }
     }
+}
+
+/**
+ * [number] as saved on [contact], when it is certain which number is meant: [number] is one of the
+ * contact's numbers and no other number of that contact has the same type. Null otherwise.
+ */
+internal fun certainNumber(
+    contact: Contact,
+    number: String,
+    sameNumber: (String, String) -> Boolean = { a, b -> ContactDirectory.sameNumber(a, b) },
+): PhoneNumber? {
+    val chosen = contact.numbers.firstOrNull { sameNumber(it.number, number) } ?: return null
+    return chosen.takeIf { contact.numbers.count { it.label == chosen.label } == 1 }
 }

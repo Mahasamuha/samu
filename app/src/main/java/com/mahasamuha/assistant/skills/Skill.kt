@@ -38,6 +38,10 @@ data class Skill(
     }
 }
 
+/** The bundled skills, except any a server skill of the same name overrides (plan §4b), then the server's. */
+fun mergeSkills(bundled: List<Skill>, server: List<Skill>): List<Skill> =
+    bundled.filter { skill -> server.none { it.name == skill.name } } + server
+
 /** Skills bundled into the APK at build time (`delivery: app`). */
 class BundledSkills(private val assets: AssetManager) {
     fun load(): List<Skill> = assets.list(DIR).orEmpty().sorted().mapNotNull { name ->

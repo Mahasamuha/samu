@@ -81,12 +81,7 @@ class GatewayChatClient(private val gateways: List<Uri>, private val auth: AuthM
                     }
                 }
                 if (!completed) throw ChatException.Unavailable("Stream ended without a completed response")
-                val kept = items
-                    // Thinking can't be sent back through the LLM gateway (its signatures are lost), and
-                    // earlier turns don't need it.
-                    .filter { it.optString("type") != "reasoning" }
-                val calls = kept.filter { it.optString("type") == "function_call" }
-                    .map { ToolCall(it.getString("call_id"), it.getString("name"), it.optString("arguments")) }
+                val (kept, calls) = replayAndCalls(items)
                 if (calls.isNotEmpty()) send(ChatEvent.ToolCalls(calls))
                 send(ChatEvent.Finished(kept))
                 close()
@@ -104,44 +99,6 @@ class GatewayChatClient(private val gateways: List<Uri>, private val auth: AuthM
         }
     }
 
-    private fun requestBody(messages: List<ChatMessage>, options: ChatOptions): JSONObject {
-        val body = JSONObject()
-            .put("model", options.model)
-            .put("max_output_tokens", options.maxTokens)
-            .put("stream", true)
-            .put("reasoning", JSONObject().put("effort", options.reasoningEffort))
-            .put("instructions", messages.filter { it.role == ChatMessage.Role.SYSTEM }.joinToString("\n\n") { it.content.orEmpty() })
-            .put("input", JSONArray().apply { messages.forEach { message -> inputItems(message).forEach(::put) } })
-        val tools = JSONArray()
-        options.tools.forEach { tool ->
-            tools.put(JSONObject()
-                .put("type", "function")
-                .put("name", tool.name)
-                .put("description", tool.description)
-                .put("parameters", tool.inputSchema))
-        }
-        if (tools.length() > 0) body.put("tools", tools)
-        return body
-    }
-
-    /** One conversation entry as Responses input items. Assistant turns go back exactly as received. */
-    private fun inputItems(message: ChatMessage): List<JSONObject> = when (message.role) {
-        ChatMessage.Role.SYSTEM -> emptyList() // sent as instructions
-        ChatMessage.Role.USER -> listOf(JSONObject().put("role", "user").put("content", message.content.orEmpty()))
-        ChatMessage.Role.TOOL -> listOf(JSONObject()
-            .put("type", "function_call_output")
-            .put("call_id", message.toolCallId)
-            .put("output", message.content.orEmpty()))
-        ChatMessage.Role.ASSISTANT -> message.replay.ifEmpty {
-            buildList {
-                message.content?.takeIf { it.isNotEmpty() }?.let { add(JSONObject().put("role", "assistant").put("content", it)) }
-                message.toolCalls.forEach { call ->
-                    add(JSONObject().put("type", "function_call").put("call_id", call.id).put("name", call.name).put("arguments", call.arguments))
-                }
-            }
-        }
-    }
-
     private fun event(payload: String): JSONObject? = try {
         JSONObject(payload)
     } catch (e: JSONException) {
@@ -149,15 +106,63 @@ class GatewayChatClient(private val gateways: List<Uri>, private val auth: AuthM
         null
     }
 
-    private fun errorFor(status: Int): ChatException = when (status) {
-        401 -> ChatException.Unauthorized()
-        402 -> ChatException.BudgetExceeded()
-        429 -> ChatException.RateLimited()
-        in 400..499 -> ChatException.Rejected(status)
-        else -> ChatException.Unavailable("Gateway returned $status")
-    }
-
     private companion object {
         const val RESPONSE_START_TIMEOUT_MS = 15_000L
     }
+}
+
+internal fun requestBody(messages: List<ChatMessage>, options: ChatOptions): JSONObject {
+    val body = JSONObject()
+        .put("model", options.model)
+        .put("max_output_tokens", options.maxTokens)
+        .put("stream", true)
+        .put("reasoning", JSONObject().put("effort", options.reasoningEffort))
+        .put("instructions", messages.filter { it.role == ChatMessage.Role.SYSTEM }.joinToString("\n\n") { it.content.orEmpty() })
+        .put("input", JSONArray().apply { messages.forEach { message -> inputItems(message).forEach(::put) } })
+    val tools = JSONArray()
+    options.tools.forEach { tool ->
+        tools.put(JSONObject()
+            .put("type", "function")
+            .put("name", tool.name)
+            .put("description", tool.description)
+            .put("parameters", tool.inputSchema))
+    }
+    if (tools.length() > 0) body.put("tools", tools)
+    return body
+}
+
+/** One conversation entry as Responses input items. Assistant turns go back exactly as received. */
+private fun inputItems(message: ChatMessage): List<JSONObject> = when (message.role) {
+    ChatMessage.Role.SYSTEM -> emptyList() // sent as instructions
+    ChatMessage.Role.USER -> listOf(JSONObject().put("role", "user").put("content", message.content.orEmpty()))
+    ChatMessage.Role.TOOL -> listOf(JSONObject()
+        .put("type", "function_call_output")
+        .put("call_id", message.toolCallId)
+        .put("output", message.content.orEmpty()))
+    ChatMessage.Role.ASSISTANT -> message.replay.ifEmpty {
+        buildList {
+            message.content?.takeIf { it.isNotEmpty() }?.let { add(JSONObject().put("role", "assistant").put("content", it)) }
+            message.toolCalls.forEach { call ->
+                add(JSONObject().put("type", "function_call").put("call_id", call.id).put("name", call.name).put("arguments", call.arguments))
+            }
+        }
+    }
+}
+
+internal fun errorFor(status: Int): ChatException = when (status) {
+    401 -> ChatException.Unauthorized()
+    402 -> ChatException.BudgetExceeded()
+    429 -> ChatException.RateLimited()
+    in 400..499 -> ChatException.Rejected(status)
+    else -> ChatException.Unavailable("Gateway returned $status")
+}
+
+/** The items to keep for replay (without thinking) and the function calls among them. */
+internal fun replayAndCalls(items: List<JSONObject>): Pair<List<JSONObject>, List<ToolCall>> {
+    // Thinking can't be sent back through the LLM gateway (its signatures are lost), and
+    // earlier turns don't need it.
+    val kept = items.filter { it.optString("type") != "reasoning" }
+    val calls = kept.filter { it.optString("type") == "function_call" }
+        .map { ToolCall(it.getString("call_id"), it.getString("name"), it.optString("arguments")) }
+    return kept to calls
 }

@@ -19,7 +19,7 @@ import org.json.JSONObject
  * so the result holds only what the answer needs. To change provider, replace this tool (e.g. with a
  * remote `get_weather`, plan §4b) rather than the forecast source.
  */
-class WeatherTool(private val provider: OpenMeteoWeather, private val locations: LocationSource) : ReadOnlyTool {
+class WeatherTool(private val fetchForecast: ForecastFetch, private val locations: LocationSource) : ReadOnlyTool {
 
     // The server's Pirate Weather version replaces this one, which stays behind it as the fallback.
     override val allowRemote = true
@@ -65,7 +65,7 @@ class WeatherTool(private val provider: OpenMeteoWeather, private val locations:
         // phone's date stands in for the place's here (one extra day covers time zones); checked below.
         val last = endDay ?: day ?: LocalDate.now().plusDays(1)
         val days = ChronoUnit.DAYS.between(LocalDate.now(), last).toInt() + 2
-        val forecast = provider.forecast(place.latitude, place.longitude, unitsForLocale(), days)
+        val forecast = fetchForecast(place.latitude, place.longitude, unitsForLocale(), days)
 
         val today = forecast.now.toLocalDate()
         if (day != null) require(!day.isBefore(today)) { "Only forecasts are available, not past weather" }

@@ -16,49 +16,7 @@ class OpenMeteoWeather {
 
     /** Current conditions, and hourly and daily forecasts for [days] days starting today (1–16). */
     suspend fun forecast(latitude: Double, longitude: Double, units: Units, days: Int): Forecast = withContext(Dispatchers.IO) {
-        val json = JSONObject(get(url(latitude, longitude, units, days.coerceIn(1, MAX_DAYS))))
-        val currentJson = json.getJSONObject("current")
-        val now = LocalDateTime.parse(currentJson.getString("time"))
-
-        val hourly = json.getJSONObject("hourly")
-        val hourTimes = hourly.getJSONArray("time")
-        val hours = (0 until hourTimes.length())
-            .map { i -> i to LocalDateTime.parse(hourTimes.getString(i)) }
-            .filter { (_, time) -> time.isAfter(now) }
-            .map { (i, time) ->
-                Forecast.Hour(
-                    time = time,
-                    temperature = hourly.getJSONArray("temperature_2m").getDouble(i),
-                    condition = condition(hourly.getJSONArray("weather_code").getInt(i)),
-                    precipitationChance = hourly.getJSONArray("precipitation_probability").optIntOrNull(i),
-                )
-            }
-
-        val daily = json.getJSONObject("daily")
-        val dates = daily.getJSONArray("time")
-        val days = (0 until dates.length()).map { i ->
-            Forecast.Day(
-                date = LocalDate.parse(dates.getString(i)),
-                high = daily.getJSONArray("temperature_2m_max").getDouble(i),
-                low = daily.getJSONArray("temperature_2m_min").getDouble(i),
-                condition = condition(daily.getJSONArray("weather_code").getInt(i)),
-                precipitationChance = daily.getJSONArray("precipitation_probability_max").optIntOrNull(i),
-            )
-        }
-
-        Forecast(
-            units = units,
-            now = now,
-            current = Forecast.Current(
-                temperature = currentJson.getDouble("temperature_2m"),
-                feelsLike = currentJson.getDouble("apparent_temperature"),
-                condition = condition(currentJson.getInt("weather_code")),
-                windSpeed = currentJson.getDouble("wind_speed_10m"),
-                humidity = currentJson.optInt("relative_humidity_2m", -1).takeIf { it >= 0 },
-            ),
-            hours = hours,
-            days = days,
-        )
+        parseForecast(get(url(latitude, longitude, units, days.coerceIn(1, MAX_DAYS))), units)
     }
 
     private fun url(latitude: Double, longitude: Double, units: Units, days: Int): String {
@@ -90,31 +48,78 @@ class OpenMeteoWeather {
         /** The furthest Open-Meteo forecasts, in days including today. */
         const val MAX_DAYS = 16
     }
+}
 
-    private fun JSONArray.optIntOrNull(index: Int): Int? = if (isNull(index)) null else optInt(index)
+/** Shapes an Open-Meteo forecast response into a [Forecast]; hours before the response's current time are dropped. */
+internal fun parseForecast(body: String, units: Units): Forecast {
+    val json = JSONObject(body)
+    val currentJson = json.getJSONObject("current")
+    val now = LocalDateTime.parse(currentJson.getString("time"))
 
-    /** WMO weather interpretation codes, as used by Open-Meteo. */
-    private fun condition(code: Int): String = when (code) {
-        0 -> "clear"
-        1 -> "mostly clear"
-        2 -> "partly cloudy"
-        3 -> "overcast"
-        45, 48 -> "fog"
-        51, 53, 55 -> "drizzle"
-        56, 57 -> "freezing drizzle"
-        61 -> "light rain"
-        63 -> "rain"
-        65 -> "heavy rain"
-        66, 67 -> "freezing rain"
-        71 -> "light snow"
-        73 -> "snow"
-        75 -> "heavy snow"
-        77 -> "snow grains"
-        80, 81 -> "rain showers"
-        82 -> "heavy rain showers"
-        85, 86 -> "snow showers"
-        95 -> "thunderstorms"
-        96, 99 -> "thunderstorms with hail"
-        else -> "unknown"
+    val hourly = json.getJSONObject("hourly")
+    val hourTimes = hourly.getJSONArray("time")
+    val hours = (0 until hourTimes.length())
+        .map { i -> i to LocalDateTime.parse(hourTimes.getString(i)) }
+        .filter { (_, time) -> time.isAfter(now) }
+        .map { (i, time) ->
+            Forecast.Hour(
+                time = time,
+                temperature = hourly.getJSONArray("temperature_2m").getDouble(i),
+                condition = condition(hourly.getJSONArray("weather_code").getInt(i)),
+                precipitationChance = hourly.getJSONArray("precipitation_probability").optIntOrNull(i),
+            )
+        }
+
+    val daily = json.getJSONObject("daily")
+    val dates = daily.getJSONArray("time")
+    val days = (0 until dates.length()).map { i ->
+        Forecast.Day(
+            date = LocalDate.parse(dates.getString(i)),
+            high = daily.getJSONArray("temperature_2m_max").getDouble(i),
+            low = daily.getJSONArray("temperature_2m_min").getDouble(i),
+            condition = condition(daily.getJSONArray("weather_code").getInt(i)),
+            precipitationChance = daily.getJSONArray("precipitation_probability_max").optIntOrNull(i),
+        )
     }
+
+    return Forecast(
+        units = units,
+        now = now,
+        current = Forecast.Current(
+            temperature = currentJson.getDouble("temperature_2m"),
+            feelsLike = currentJson.getDouble("apparent_temperature"),
+            condition = condition(currentJson.getInt("weather_code")),
+            windSpeed = currentJson.getDouble("wind_speed_10m"),
+            humidity = currentJson.optInt("relative_humidity_2m", -1).takeIf { it >= 0 },
+        ),
+        hours = hours,
+        days = days,
+    )
+}
+
+private fun JSONArray.optIntOrNull(index: Int): Int? = if (isNull(index)) null else optInt(index)
+
+/** WMO weather interpretation codes, as used by Open-Meteo. */
+private fun condition(code: Int): String = when (code) {
+    0 -> "clear"
+    1 -> "mostly clear"
+    2 -> "partly cloudy"
+    3 -> "overcast"
+    45, 48 -> "fog"
+    51, 53, 55 -> "drizzle"
+    56, 57 -> "freezing drizzle"
+    61 -> "light rain"
+    63 -> "rain"
+    65 -> "heavy rain"
+    66, 67 -> "freezing rain"
+    71 -> "light snow"
+    73 -> "snow"
+    75 -> "heavy snow"
+    77 -> "snow grains"
+    80, 81 -> "rain showers"
+    82 -> "heavy rain showers"
+    85, 86 -> "snow showers"
+    95 -> "thunderstorms"
+    96, 99 -> "thunderstorms with hail"
+    else -> "unknown"
 }

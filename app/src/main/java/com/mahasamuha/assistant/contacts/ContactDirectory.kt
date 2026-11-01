@@ -55,7 +55,7 @@ class ContactDirectory(private val resolver: ContentResolver, private val resour
     /**
      * Contacts whose name sounds like [heard], best first, for when [find] matches nothing because speech
      * recognition misspelled an uncommon name. Kept: names scoring at least [SOUND_ALIKE_MIN] and within
-     * [SOUND_ALIKE_MARGIN] of the best, since the right name tends to stand clear of the rest. The whole list
+     * [SOUND_ALIKE_MARGIN] of the best (see [soundAlikeNames]), since the right name tends to stand clear of the rest. The whole list
      * of names is read on the phone; only these candidates leave it.
      */
     suspend fun soundAlike(heard: String, limit: Int = 3): List<Contact> {
@@ -66,12 +66,7 @@ class ContactDirectory(private val resolver: ContentResolver, private val resour
                 }
             }
         }
-        val scored = names.map { it to soundAlikeScore(heard, it) }.sortedByDescending { (_, score) -> score }
-        val best = scored.firstOrNull()?.second ?: return emptyList()
-        return scored
-            .filter { (_, score) -> score >= SOUND_ALIKE_MIN && score >= best - SOUND_ALIKE_MARGIN }
-            .take(limit)
-            .mapNotNull { (name, _) -> find(name).firstOrNull { it.name == name } }
+        return soundAlikeNames(heard, names, limit).mapNotNull { name -> find(name).firstOrNull { it.name == name } }
     }
 
     /**
@@ -131,11 +126,6 @@ class ContactDirectory(private val resolver: ContentResolver, private val resour
     }
 
     companion object {
-        // Set from on-device lookups (docs/phase3-notes.md): the right name scored 0.96–1.00 and the
-        // next-best wrong one 0.08–0.12 below it.
-        private const val SOUND_ALIKE_MIN = 0.80
-        private const val SOUND_ALIKE_MARGIN = 0.06
-
         fun formatNumber(number: String): String =
             PhoneNumberUtils.formatNumber(number, Locale.getDefault().country) ?: number
 

@@ -14,9 +14,9 @@ import org.json.JSONObject
  * `send_sms`: always confirmed (plan §2). The read-back names the recipient from the phone's own
  * lookup of the number, and the text goes to that contact's saved number, so it says who will actually
  * get the text, whatever the model believes. [contacts] is null when contacts permission is off; the
- * read-back then gives the number.
+ * read-back then gives the number. [send] sends the text; [SmsSender.send] is the real one.
  */
-class SendSmsTool(private val sender: SmsSender, private val contacts: ContactDirectory?) : ActionTool {
+class SendSmsTool(private val send: suspend (number: String, message: String) -> SmsSender.Outcome, private val contacts: ContactDirectory?) : ActionTool {
 
     override val definition = ToolDefinition(
         name = "send_sms",
@@ -50,7 +50,7 @@ class SendSmsTool(private val sender: SmsSender, private val contacts: ContactDi
         // The added period only paces the speech; the text is sent as written.
         val body = if (message.last() in ".!?") message else "$message."
         return PendingAction(Confirmation.Ask("Text ${recipient.description}: $body Send it?")) {
-            when (sender.send(recipient.number, message)) {
+            when (send(recipient.number, message)) {
                 SmsSender.Outcome.Sent -> JSONObject().put("status", "sent")
                 SmsSender.Outcome.Pending -> JSONObject().put("status", "sending").put("note", "The phone hasn't confirmed it was sent yet")
             }.toString()

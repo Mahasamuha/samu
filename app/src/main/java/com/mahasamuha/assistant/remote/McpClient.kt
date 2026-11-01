@@ -35,19 +35,8 @@ class McpClient(private val gateways: List<Uri>, private val auth: AuthManager) 
     private val ids = AtomicLong()
 
     /** Runs a tool and returns its text content. A tool-reported error throws, so the registry relays it. */
-    suspend fun callTool(name: String, arguments: JSONObject): String {
-        val result = request("tools/call", JSONObject().put("name", name).put("arguments", arguments))
-        val content = result.optJSONArray("content") ?: JSONArray()
-        val text = (0 until content.length())
-            .map { content.getJSONObject(it) }
-            .filter { it.optString("type") == "text" }
-            .joinToString("\n") { it.optString("text") }
-        if (result.optBoolean("isError")) {
-            if (text.startsWith(SDK_INVALID_PARAMS_PREFIX)) throw McpStaleToolException(text)
-            throw McpException(text.ifEmpty { "Tool $name failed" })
-        }
-        return text
-    }
+    suspend fun callTool(name: String, arguments: JSONObject): String =
+        toolResultText(name, request("tools/call", JSONObject().put("name", name).put("arguments", arguments)))
 
     /** Reads a resource and returns its first content's text (the capability index is one JSON document). */
     suspend fun readResource(uri: String): String {
@@ -90,17 +79,7 @@ class McpClient(private val gateways: List<Uri>, private val auth: AuthManager) 
                 connection.disconnect()
             }
         }
-        val json = JSONObject(response)
-        json.optJSONObject("error")?.let {
-            val message = it.optString("message")
-            // Invalid params on a tool call: unknown or disabled tool, or rejected arguments. Our SDK reports
-            // these as an isError result instead (see callTool), but another server or SDK version may not.
-            if (method == "tools/call" && it.optInt("code") == INVALID_PARAMS) {
-                throw McpStaleToolException("MCP $method: $message")
-            }
-            throw McpException("MCP $method: $message")
-        }
-        return json.optJSONObject("result") ?: throw McpException("MCP $method returned no result")
+        return rpcResult(method, JSONObject(response))
     }
 
     /**
@@ -119,15 +98,48 @@ class McpClient(private val gateways: List<Uri>, private val auth: AuthManager) 
     }
 
     private companion object {
-        const val INVALID_PARAMS = -32602
-        // The server SDK wraps its own protocol errors from tools/call in an isError result with this text
-        // prefix, rather than a JSON-RPC error. A tool handler's own failure has no such prefix.
-        const val SDK_INVALID_PARAMS_PREFIX = "MCP error -32602:"
         const val PROTOCOL_VERSION = "2025-06-18"
         const val MAX_RESPONSE_BYTES = 64 * 1024
         // The capability index (tool definitions and skills) never reaches the model whole.
         const val MAX_RESOURCE_BYTES = 256 * 1024
     }
+}
+
+private const val INVALID_PARAMS = -32602
+
+// The server SDK wraps its own protocol errors from tools/call in an isError result with this text
+// prefix, rather than a JSON-RPC error. A tool handler's own failure has no such prefix.
+private const val SDK_INVALID_PARAMS_PREFIX = "MCP error -32602:"
+
+/**
+ * The text of a `tools/call` result. A tool-reported error throws: [McpStaleToolException] for the SDK's
+ * invalid-params text, [McpException] otherwise.
+ */
+internal fun toolResultText(name: String, result: JSONObject): String {
+    val content = result.optJSONArray("content") ?: JSONArray()
+    val text = (0 until content.length())
+        .map { content.getJSONObject(it) }
+        .filter { it.optString("type") == "text" }
+        .joinToString("\n") { it.optString("text") }
+    if (result.optBoolean("isError")) {
+        if (text.startsWith(SDK_INVALID_PARAMS_PREFIX)) throw McpStaleToolException(text)
+        throw McpException(text.ifEmpty { "Tool $name failed" })
+    }
+    return text
+}
+
+/** The `result` of a JSON-RPC response; a JSON-RPC `error` throws ([McpStaleToolException] for invalid params on tools/call). */
+internal fun rpcResult(method: String, json: JSONObject): JSONObject {
+    json.optJSONObject("error")?.let {
+        val message = it.optString("message")
+        // Invalid params on a tool call: unknown or disabled tool, or rejected arguments. Our SDK reports
+        // these as an isError result instead (see callTool), but another server or SDK version may not.
+        if (method == "tools/call" && it.optInt("code") == INVALID_PARAMS) {
+            throw McpStaleToolException("MCP $method: $message")
+        }
+        throw McpException("MCP $method: $message")
+    }
+    return json.optJSONObject("result") ?: throw McpException("MCP $method returned no result")
 }
 
 /** A tool definition in MCP's `tools/list` shape; also used for the definitions inside the capability index. */

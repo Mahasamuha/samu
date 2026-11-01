@@ -46,36 +46,45 @@ class SetTimerTool(
     )
 
     override suspend fun prepare(arguments: JSONObject): PendingAction {
-        val seconds = arguments.optInt("duration_seconds", 0)
-        require(seconds in MIN_SECONDS..MAX_SECONDS) {
-            "duration_seconds must be between $MIN_SECONDS and $MAX_SECONDS (24 hours)"
-        }
-        val label = cleanLabel(arguments.optString("label"))
+        val timer = resolveTimer(arguments)
+        val seconds = timer.seconds
+        val label = timer.label
         val intent = Intent(AlarmClock.ACTION_SET_TIMER)
             .putExtra(AlarmClock.EXTRA_LENGTH, seconds)
             .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
         if (label != null) intent.putExtra(AlarmClock.EXTRA_MESSAGE, label)
         require(intent.resolveActivity(context.packageManager) != null) { "No clock app handles timers" }
 
-        val duration = spokenDuration(seconds)
-        val announce = if (label == null) "Timer, $duration." else "${label.replaceFirstChar { it.uppercase() }} timer, $duration."
-        return PendingAction(Confirmation.Report(announce)) {
+        return PendingAction(Confirmation.Report(timer.announcement)) {
             launch(intent)
             closePanel()
             JSONObject().put("status", "timer_set").toString()
         }
     }
+}
 
-    /** 5400 becomes "1 hour 30 minutes"; zero parts are left out. */
-    private fun spokenDuration(seconds: Int): String {
-        val parts = listOf(seconds / 3600 to "hour", seconds % 3600 / 60 to "minute", seconds % 60 to "second")
-        return parts.filter { (n, _) -> n > 0 }.joinToString(" ") { (n, unit) -> "$n $unit${if (n == 1) "" else "s"}" }
-    }
+private const val MIN_SECONDS = 1
+private const val MAX_SECONDS = 86_400
 
-    private companion object {
-        const val MIN_SECONDS = 1
-        const val MAX_SECONDS = 86_400
+/** A validated timer request and what is said about it. */
+internal class TimerRequest(val seconds: Int, val label: String?, val announcement: String)
+
+/** Validates the model's arguments and builds the announcement from the resolved duration. Throws for bad arguments. */
+internal fun resolveTimer(arguments: JSONObject): TimerRequest {
+    val seconds = arguments.optInt("duration_seconds", 0)
+    require(seconds in MIN_SECONDS..MAX_SECONDS) {
+        "duration_seconds must be between $MIN_SECONDS and $MAX_SECONDS (24 hours)"
     }
+    val label = cleanLabel(arguments.optString("label"))
+    val duration = spokenDuration(seconds)
+    val announce = if (label == null) "Timer, $duration." else "${label.replaceFirstChar { it.uppercase() }} timer, $duration."
+    return TimerRequest(seconds, label, announce)
+}
+
+/** 5400 becomes "1 hour 30 minutes"; zero parts are left out. */
+internal fun spokenDuration(seconds: Int): String {
+    val parts = listOf(seconds / 3600 to "hour", seconds % 3600 / 60 to "minute", seconds % 60 to "second")
+    return parts.filter { (n, _) -> n > 0 }.joinToString(" ") { (n, unit) -> "$n $unit${if (n == 1) "" else "s"}" }
 }
 
 /** The model's label, trimmed and capped at 40 characters; null when empty. */

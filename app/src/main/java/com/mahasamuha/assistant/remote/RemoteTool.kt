@@ -11,18 +11,21 @@ import com.mahasamuha.assistant.voice.TAG
 import kotlinx.coroutines.CancellationException
 import org.json.JSONObject
 
+/** What a remote tool needs from the MCP client: run the named tool with these arguments and get its text. */
+typealias CallTool = suspend (name: String, arguments: JSONObject) -> String
+
 /**
  * A tool served by the MCP server (plan §4b), from its definition in the capability index. The call goes
- * through [client]; [onStale] runs when the server rejects the call as an unknown or disabled tool, or for
+ * through [callTool]; [onStale] runs when the server rejects the call as an unknown or disabled tool, or for
  * arguments it won't accept, i.e. the index may be out of date. A model's own bad arguments also trigger
  * it, which is acceptable since a refresh is cheap.
  */
-fun remoteTool(definition: ToolDefinition, client: McpClient, onStale: () -> Unit): Tool =
-    if (definition.annotations.readOnlyHint) RemoteReadOnlyTool(definition, client, onStale) else RemoteActionTool(definition, client, onStale)
+fun remoteTool(definition: ToolDefinition, callTool: CallTool, onStale: () -> Unit): Tool =
+    if (definition.annotations.readOnlyHint) RemoteReadOnlyTool(definition, callTool, onStale) else RemoteActionTool(definition, callTool, onStale)
 
 /** Calls the tool, reporting a stale index before the failure goes to the model. */
-private suspend fun call(client: McpClient, definition: ToolDefinition, arguments: JSONObject, onStale: () -> Unit): String = try {
-    client.callTool(definition.name, arguments)
+private suspend fun call(callTool: CallTool, definition: ToolDefinition, arguments: JSONObject, onStale: () -> Unit): String = try {
+    callTool(definition.name, arguments)
 } catch (e: McpStaleToolException) {
     Log.w(TAG, "Server rejected ${definition.name} (${e.message}); refreshing the capability index")
     onStale()
@@ -48,10 +51,10 @@ class FallbackTool(private val remote: ReadOnlyTool, private val local: ReadOnly
 
 private class RemoteReadOnlyTool(
     override val definition: ToolDefinition,
-    private val client: McpClient,
+    private val callTool: CallTool,
     private val onStale: () -> Unit,
 ) : ReadOnlyTool {
-    override suspend fun run(arguments: JSONObject): String = call(client, definition, arguments, onStale)
+    override suspend fun run(arguments: JSONObject): String = call(callTool, definition, arguments, onStale)
 }
 
 /**
@@ -60,13 +63,13 @@ private class RemoteReadOnlyTool(
  */
 private class RemoteActionTool(
     override val definition: ToolDefinition,
-    private val client: McpClient,
+    private val callTool: CallTool,
     private val onStale: () -> Unit,
 ) : ActionTool {
     override suspend fun prepare(arguments: JSONObject): PendingAction {
         val name = definition.annotations.title ?: definition.name.replace('_', ' ')
         val details = arguments.keys().asSequence().joinToString(", ") { key -> "$key ${arguments.opt(key)}" }
         val question = if (details.isEmpty()) "Run $name?" else "Run $name with $details?"
-        return PendingAction(Confirmation.Ask(question)) { call(client, definition, arguments, onStale) }
+        return PendingAction(Confirmation.Ask(question)) { call(callTool, definition, arguments, onStale) }
     }
 }

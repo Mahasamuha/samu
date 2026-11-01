@@ -1,5 +1,23 @@
 package com.mahasamuha.assistant.contacts
 
+// Set from on-device lookups (docs/phase3-notes.md): the right name scored 0.96–1.00 and the
+// next-best wrong one 0.08–0.12 below it.
+internal const val SOUND_ALIKE_MIN = 0.80
+internal const val SOUND_ALIKE_MARGIN = 0.06
+
+/**
+ * The [names] that sound like [heard], best first: at least [SOUND_ALIKE_MIN] and within
+ * [SOUND_ALIKE_MARGIN] of the best score, since the right name tends to stand clear of the rest. At most [limit].
+ */
+internal fun soundAlikeNames(heard: String, names: Collection<String>, limit: Int): List<String> {
+    val scored = names.map { it to soundAlikeScore(heard, it) }.sortedByDescending { (_, score) -> score }
+    val best = scored.firstOrNull()?.second ?: return emptyList()
+    return scored
+        .filter { (_, score) -> score >= SOUND_ALIKE_MIN && score >= best - SOUND_ALIKE_MARGIN }
+        .take(limit)
+        .map { (name, _) -> name }
+}
+
 /**
  * How much a heard name sounds like a contact's name, 0 to 1. Speech recognition writes uncommon names
  * as something familiar ("Shivon" for Siobhan, "Kira" for Ciara), so each word of [heard] is compared
