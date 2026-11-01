@@ -7,8 +7,6 @@ import androidx.core.net.toUri
 data class AppConfig(
     val issuer: Uri,
     val clientId: String,
-    /** In priority order. v1 uses the first; the rest are for fallback later. */
-    val gatewayUrls: List<Uri>,
     val redirectUri: Uri,
 ) {
     companion object {
@@ -16,7 +14,6 @@ data class AppConfig(
             AppConfig(
                 issuer = https(BuildConfig.ISSUER_URL),
                 clientId = BuildConfig.CLIENT_ID,
-                gatewayUrls = BuildConfig.GATEWAY_URLS.split(",").map { https(it.trim().trimEnd('/')) },
                 redirectUri = "${BuildConfig.APPLICATION_ID}:/oauth2redirect".toUri(),
             )
 

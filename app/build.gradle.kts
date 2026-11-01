@@ -164,7 +164,6 @@ android {
 
         buildConfigField("String", "ISSUER_URL", "\"${localConfigValue("assistant.issuerUrl")}\"")
         buildConfigField("String", "CLIENT_ID", "\"${localConfigValue("assistant.clientId")}\"")
-        buildConfigField("String", "GATEWAY_URLS", "\"${localConfigValue("assistant.gatewayUrls")}\"")
         // AppAuth's redirect receiver listens on this scheme: <applicationId>:/oauth2redirect
         manifestPlaceholders["appAuthRedirectScheme"] = "com.mahasamuha.assistant"
     }

@@ -80,7 +80,7 @@ Each WP is one Sonnet task, one commit (conventional prefix), typecheck clean. F
 - Accounts: `POST /grants` (owner + `api_key` credential only; schema has no FK path to OAuth rows), `DELETE /grants/{id}`, `GET /grants` (own grants + known principals). Wildcard grantee. Anthropic grants trigger VK re-pin (review item 4). Resolution order per phase4-plan §3 in one function used by both resolve and VK lookup.
 
 ### WP-5 — App: connections + grants screens (after WP-K contract; finishes after WP-4 deploy)
-- New `app/.../accounts/AccountsClient.kt` (HttpURLConnection + `org.json`, like `remote/McpClient.kt`; bearer from `AuthManager.freshAccessToken()`, gateway from `AppConfig.gatewayUrls`).
+- New `app/.../accounts/AccountsClient.kt` (HttpURLConnection + `org.json`, like `remote/McpClient.kt`; bearer from `AuthManager.freshAccessToken()`, gateway from the `AssistantApp.gateways` function, as `McpClient` does).
 - `ConnectionsScreen.kt` composable reached from `MainActivity`'s setup screen: row per connector with status; write-only paste fields (multi-field for Plex); "shared by <name>" + act-as-owner warning; grant screen with principal picker, the warning inside the confirm dialog.
 - `llm/GatewayChatClient.kt` `errorFor`: 403 → new `ChatException.NoModelAccess`, spoken as "You don't have access to the assistant's language model yet."
 

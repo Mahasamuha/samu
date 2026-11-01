@@ -37,7 +37,8 @@ class McpStaleToolException(
  * would roughly double the APK (plan §6).
  */
 class McpClient(
-    private val gateways: List<Uri>,
+    /** Read at each request, so a URL changed on the setup screen applies at once. */
+    private val gateways: () -> List<Uri>,
     private val auth: AuthManager,
 ) {
     private val ids = AtomicLong()
@@ -74,7 +75,7 @@ class McpClient(
                 .put("method", method)
                 .put("params", params)
         // v1 uses the first gateway; the list leaves room for a fallback.
-        val connection = URL("${gateways.first()}/mcp").openConnection() as HttpURLConnection
+        val connection = URL("${gateways().first()}/mcp").openConnection() as HttpURLConnection
         val response =
             disconnectingOnCancel(connection) {
                 try {

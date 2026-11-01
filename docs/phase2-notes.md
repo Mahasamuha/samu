@@ -79,7 +79,7 @@ Stack running on the development workstation (`GATEWAY_BIND` on its LAN address)
 AppAuth 0.11.1, authorization code + PKCE (S256) in a Custom Tab, scopes `openid offline_access`, redirect `com.mahasamuha.assistant:/oauth2redirect`. AppAuth's merged manifest brings the browser `<queries>` and the redirect receiver, so no extra manifest work on API 37.
 
 - Auth state (with the refresh token) is AES-256-GCM encrypted under an Android Keystore key generated with StrongBox when available, else TEE, and `setUnlockedDeviceRequired(true)`, so it can't be decrypted while the phone is locked.
-- Endpoints come from the gitignored `app/config.local.properties` into `BuildConfig` (`config.example.properties` is the template). Gateway URLs are a comma-separated list.
+- The issuer and client ID come from the gitignored `app/config.local.properties` into `BuildConfig` (`config.example.properties` is the template). The gateway URL was a comma-separated list there in phase 2; it is now set on the setup screen (plan §5b).
 - The setup screen's "Test gateway" button sends one non-streamed request with a fresh token (temporary; replaced by the streaming client).
 
 
