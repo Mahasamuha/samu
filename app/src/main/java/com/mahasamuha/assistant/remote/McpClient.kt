@@ -21,7 +21,7 @@ open class McpException(message: String, cause: Throwable? = null) : Exception(m
 class McpUnknownToolException(message: String) : McpException(message)
 
 /**
- * The few MCP calls the phone needs (`tools/list`, `tools/call`), as JSON-RPC over the auth gateway's
+ * The few MCP calls the phone needs (`tools/call`, `resources/read`), as JSON-RPC over the auth gateway's
  * `/mcp` route. Our server is stateless and answers in plain JSON, so each call is one POST: no session,
  * no event stream, and no `initialize` handshake (a stateless server keeps nothing from one request to the
  * next; the protocol version travels in a header instead). The official Kotlin SDK covers all of MCP but
@@ -29,19 +29,6 @@ class McpUnknownToolException(message: String) : McpException(message)
  */
 class McpClient(private val gateways: List<Uri>, private val auth: AuthManager) {
     private val ids = AtomicLong()
-
-    /** The server's tools, as definitions for the model. Unset annotations take MCP's defaults. */
-    suspend fun listTools(): List<ToolDefinition> {
-        val definitions = mutableListOf<ToolDefinition>()
-        var cursor: String? = null
-        do {
-            val result = request("tools/list", JSONObject().apply { cursor?.let { put("cursor", it) } })
-            val tools = result.optJSONArray("tools") ?: JSONArray()
-            for (i in 0 until tools.length()) definitions += toolDefinition(tools.getJSONObject(i))
-            cursor = result.optString("nextCursor").takeIf { it.isNotEmpty() }
-        } while (cursor != null)
-        return definitions
-    }
 
     /** Runs a tool and returns its text content. A tool-reported error throws, so the registry relays it. */
     suspend fun callTool(name: String, arguments: JSONObject): String {

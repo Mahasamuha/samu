@@ -48,6 +48,6 @@ There is no tier field; it is derived from `where`:
 
 ## Consumers
 
-These land in later phase 3.5 work packages:
+Two consumers read the manifest:
 - Gradle bundles the local and hybrid entries into the APK, and fails the build on a local tool that is in no local or hybrid capability.
 - The MCP server serves the hybrid and server entries, filtered to the tools it registered, through the `capability://index` resource.

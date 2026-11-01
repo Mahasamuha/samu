@@ -1,6 +1,6 @@
 # Phase 3.5 implementation plan: capabilities and late-bound tools
 
-Status: draft for review, 2026-10-31 (revised the same day: ownership tiers, on-device cache, optional tools). Phase 4's implementation plan (`docs/phase4-implementation.md`) builds on this.
+Status: in progress, 2026-10-31 (revised the same day: ownership tiers, on-device cache, optional tools). Phase 4's implementation plan (`docs/phase4-implementation.md`) builds on this.
 
 ## Context
 
@@ -135,3 +135,7 @@ Initial load settings (tune from logs): eager = calling, texting, clock, music, 
   - Contacts permission off: calling and texting not listed; navigation listed without `find_contact`, and "navigate to the hardware store" works.
   - Sign out: cache file deleted.
 - Record results and latencies in `docs/phase3.5-notes.md`.
+
+## Open issues
+
+- **Stale remote tool detection is too narrow** (2026-11-01). `McpClient` only raises `McpUnknownToolException`, which schedules a cache refresh, when `tools/call` returns -32602 with "not found" in the message. That is an SDK-specific error shape we haven't verified. Refreshing the index is cheap, so the trigger should be broader, e.g. any `tools/call` protocol error for a tool in the cached index, though probably not every tool failure. Not yet decided.

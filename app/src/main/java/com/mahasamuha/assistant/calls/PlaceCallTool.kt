@@ -92,7 +92,7 @@ class PlaceCallTool(
         }
     }
 
-    // Only registered while CALL_PHONE is granted (AssistantApp.sessionTools).
+    // Only registered while CALL_PHONE is granted (AssistantApp.sessionCatalog).
     @SuppressLint("MissingPermission")
     private fun placeCall(number: String) {
         telecom.placeCall(Uri.fromParts("tel", number, null), Bundle())

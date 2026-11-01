@@ -26,7 +26,7 @@ class UseCapabilityTool(private val catalog: SessionCatalog) : ReadOnlyTool {
     override suspend fun run(arguments: JSONObject): String {
         val id = arguments.optString("id").trim()
         val result = catalog.bind(id)
-            ?: throw IllegalArgumentException("Unknown capability \"$id\". Available: ${catalog.lazyCapabilities.joinToString { it.id }}")
+            ?: throw IllegalArgumentException("Unknown capability \"$id\". Available: ${catalog.bindableIds.joinToString()}")
         return JSONObject()
             .put("capability", result.capability)
             .put("tools", JSONArray(result.toolNames))

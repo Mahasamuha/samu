@@ -206,7 +206,7 @@ class MainActivity : ComponentActivity() {
             minutes < 24 * 60 -> "${minutes / 60} h ago"
             else -> "${minutes / (24 * 60)} d ago"
         }
-        return "Updated $age (${index.capabilities.size} from the server)."
+        return "Cached index, updated $age (${index.capabilities.size} remote or hybrid capabilities)."
     }
 
     /** UI boundary: runs [block] and shows its result, or the error, as the status message. */

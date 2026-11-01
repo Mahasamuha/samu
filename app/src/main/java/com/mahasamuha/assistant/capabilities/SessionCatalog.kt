@@ -34,6 +34,9 @@ class SessionCatalog(
     /** Lazy capabilities the model can bind, sorted by id. */
     val lazyCapabilities: List<Capability> = available.map { it.capability }.filter { it.load == Load.LAZY }.sortedBy { it.id }
 
+    /** Every id [bind] accepts (eager and lazy), sorted. */
+    val bindableIds: List<String> = byId.keys.sorted()
+
     /** Skills for the system prompt: instruction-only ones, and those attached to an eagerly bound capability. */
     val eagerSkills: List<Skill>
 
