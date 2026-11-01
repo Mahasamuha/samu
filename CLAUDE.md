@@ -15,6 +15,7 @@ mcp/       MCP server for remote tools (web search) — TypeScript on Node, pnpm
 deploy/    Server-side config: compose files for gateway + Bifrost, reverse proxy snippets, env templates (placeholders only)
 docs/      plan.md and any design notes
 skills/    SKILL.md instruction bundles (plan §4b); bundled into the app (delivery: app) or served as drafts (delivery: server)
+capabilities/  capabilities.json: groups tools into capabilities (phase 3.5); bundled into the app (local, hybrid) and served by mcp/ (hybrid, server)
 ```
 
 These are independent build units. Don't introduce a monorepo tool unless one is clearly needed.
@@ -50,7 +51,8 @@ No infrastructure specifics go into tracked files or commit messages. This cover
 - Readability over cleverness.
 - Throw exceptions and handle them at the boundary.
 - Never hardcode secrets. Use env vars, and commit `.env.example` files, never `.env`.
-- Don't write tests unless asked.
+- Write unit tests for new and changed logic, and run them in CI. Tests don't need a device; on-device checks stay in the phase notes.
+- Style follows the configured formatters and linters (ktlint, Prettier, ESLint; see `docs/testing.md`). A deviation needs a noted reason, in the config or at the suppression.
 - Commit messages use conventional prefixes (`feat:`, `fix:`, `chore:`).
 
 **TypeScript (gateway)**
@@ -64,6 +66,7 @@ No infrastructure specifics go into tracked files or commit messages. This cover
 - `minSdk`/`targetSdk`/`compileSdk` = 37. Only one device exists, so there's no reason to support older APIs.
 - Use AppAuth-Android for OAuth (auth code + PKCE via custom tab).
 - Store the refresh token encrypted with a hardware-backed Android Keystore key.
+- A dependency that is one operation (a callback, a platform call, a test seam) is a function type, with a `typealias` when the signature is long or repeated. Use an `interface` for real swap points (STT, TTS, LLM endpoint) and multi-operation roles; `fun interface` only when a lambda won't do.
 - Keep dependencies lean. Ask before adding a DI framework; manual construction is fine at this size.
 
 ## Android 17 gotchas (details in plan §3)
@@ -74,7 +77,7 @@ No infrastructure specifics go into tracked files or commit messages. This cover
 
 ## Current phase
 
-Phases 1–3 are done (`docs/phase1-notes.md`, `docs/phase2-notes.md`, `docs/phase3-notes.md`): invocation, the gateway + Bifrost voice round trip, and the tools-and-skills design in plan §4b, including the MCP server (web search, Pirate Weather). Two security review rounds have been fixed and checked on device. **The server side is deployed on the home server**: the gateway and MCP images are published to Docker Hub by `.github/workflows/images.yml` and pulled there (`deploy/README.md`); the dev stack on the workstation is stopped. Next: daily use on the Pixel 8, then phase 4 (screen context) only if a real need shows up. Draft skills via MCP wait until a draft exists. The phase 1 and phase 2 sections below are kept as the original briefs.
+Phases 1–3 are done (`docs/phase1-notes.md`, `docs/phase2-notes.md`, `docs/phase3-notes.md`): invocation, the gateway + Bifrost voice round trip, and the tools-and-skills design in plan §4b, including the MCP server (web search, Pirate Weather). Two security review rounds have been fixed and checked on device. **The server side is deployed on the home server**: the gateway and MCP images are published to Docker Hub by `.github/workflows/images.yml` and pulled there (`deploy/README.md`); the dev stack on the workstation is stopped. **In progress: phase 3.5, capabilities and late binding** (`docs/phase3.5-plan.md`): a capability manifest in `capabilities/`, a `capability://index` MCP resource cached on the phone, and eager/lazy binding through `use_capability`. Then phase 4, principals, credentials and connectors (`docs/phase4-plan.md`); screen context moved to phase 5. Draft skills reach the phone through the capability index once a draft exists. The phase 1 and phase 2 sections below are kept as the original briefs.
 
 ### Phase 1 — Prove invocation
 

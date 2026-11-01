@@ -1,15 +1,19 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
 import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ktlint)
 }
 
 // Real endpoints live in the gitignored config.local.properties (see config.example.properties).
-val localConfig = Properties().apply {
-    val file = rootProject.file("config.local.properties")
-    if (file.exists()) file.inputStream().use(::load)
-}
+val localConfig =
+    Properties().apply {
+        val file = rootProject.file("config.local.properties")
+        if (file.exists()) file.inputStream().use(::load)
+    }
 
 /**
  * Copies the skills marked `delivery: app` from the repo's skills/ folder into the APK's assets
@@ -25,7 +29,11 @@ abstract class BundleSkills : DefaultTask() {
 
     @TaskAction
     fun bundle() {
-        val out = outputDir.get().asFile.apply { deleteRecursively(); mkdirs() }
+        val out =
+            outputDir.get().asFile.apply {
+                deleteRecursively()
+                mkdirs()
+            }
         skillsDir.get().asFile.listFiles().orEmpty().filter { it.isDirectory }.sortedBy { it.name }.forEach { dir ->
             val file = File(dir, "SKILL.md").takeIf { it.isFile } ?: return@forEach
             val frontmatter = file.readText().substringAfter("---\n", "").substringBefore("\n---", "")
@@ -35,9 +43,86 @@ abstract class BundleSkills : DefaultTask() {
     }
 }
 
-val bundleSkills = tasks.register<BundleSkills>("bundleSkills") {
-    skillsDir.set(layout.projectDirectory.dir("../skills"))
+val bundleSkills =
+    tasks.register<BundleSkills>("bundleSkills") {
+        skillsDir.set(layout.projectDirectory.dir("../skills"))
+    }
+
+/**
+ * Writes the local and hybrid entries of the repo's capabilities manifest into the APK's assets (plan
+ * phase 3.5). Server-only entries are the MCP server's. Fails the build if a local tool the app registers
+ * belongs to no local or hybrid capability, or if the manifest names a local tool the app doesn't have.
+ */
+abstract class BundleCapabilities : DefaultTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val manifest: RegularFileProperty
+
+    /** The app's Kotlin sources, scanned for the tools it registers. */
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val sources: ConfigurableFileCollection
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun bundle() {
+        @Suppress("UNCHECKED_CAST")
+        val entries = (JsonSlurper().parse(manifest.get().asFile) as Map<String, Any?>)["capabilities"] as List<Map<String, Any?>>
+
+        // Every local tool declares itself as `ToolDefinition(name = "<tool>", ...)`.
+        val toolPattern = Regex("""ToolDefinition\(\s*name\s*=\s*"([^"]+)"""")
+        val appTools =
+            sources.files
+                .filter { it.extension == "kt" }
+                .flatMap { file -> toolPattern.findAll(file.readText()).map { it.groupValues[1] } }
+                .toSet()
+        if (appTools.isEmpty()) {
+            throw GradleException(
+                "Found no `ToolDefinition(name = \"...\")` in the app sources; the capability check can't run. Did the tool declaration style change?",
+            )
+        }
+
+        fun tools(entry: Map<String, Any?>) =
+            (entry["tools"] as List<*>).map {
+                @Suppress("UNCHECKED_CAST")
+                (it as Map<String, Any?>)
+            }
+
+        // Tier from `where`: local only = local, remote only = server, anything else = hybrid.
+        fun isServerOnly(entry: Map<String, Any?>) = tools(entry).all { it["where"] == "remote" }
+
+        val bundled = entries.filterNot(::isServerOnly)
+        val covered = bundled.flatMap { entry -> tools(entry).filter { it["where"] != "remote" }.map { it["name"] as String } }.toSet()
+
+        val orphans = (appTools - covered).sorted()
+        if (orphans.isNotEmpty()) {
+            throw GradleException(
+                "Local tools in no local or hybrid capability in capabilities/capabilities.json: ${orphans.joinToString()}",
+            )
+        }
+        val unknown = (covered - appTools).sorted()
+        if (unknown.isNotEmpty()) {
+            throw GradleException(
+                "capabilities/capabilities.json lists local or hybrid tools the app doesn't register: ${unknown.joinToString()}",
+            )
+        }
+
+        val out =
+            outputDir.get().asFile.apply {
+                deleteRecursively()
+                mkdirs()
+            }
+        File(out, "capabilities.json").writeText(JsonOutput.prettyPrint(JsonOutput.toJson(mapOf("capabilities" to bundled))) + "\n")
+    }
 }
+
+val bundleCapabilities =
+    tasks.register<BundleCapabilities>("bundleCapabilities") {
+        manifest.set(layout.projectDirectory.file("../capabilities/capabilities.json"))
+        sources.from(fileTree("src/main/java") { include("**/*.kt") })
+    }
 
 fun localConfigValue(key: String): String =
     localConfig.getProperty(key)?.takeIf { it.isNotBlank() }
@@ -45,11 +130,15 @@ fun localConfigValue(key: String): String =
 
 /** Runs a git command and returns its trimmed stdout, or null if git fails (no tags, no repo). */
 fun gitOutput(vararg args: String): String? {
-    val result = providers.exec {
-        commandLine("git", *args)
-        isIgnoreExitValue = true
-    }
-    return result.standardOutput.asText.get().trim().takeIf { result.result.get().exitValue == 0 && it.isNotEmpty() }
+    val result =
+        providers.exec {
+            commandLine("git", *args)
+            isIgnoreExitValue = true
+        }
+    return result.standardOutput.asText
+        .get()
+        .trim()
+        .takeIf { result.result.get().exitValue == 0 && it.isNotEmpty() }
 }
 
 // Version comes from the vX.Y.Z tags CI creates on main; before the first tag, a dev placeholder.
@@ -92,6 +181,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    testOptions {
+        // Lets code under test call android.util.Log etc. without Robolectric; they return defaults.
+        unitTests.isReturnDefaultValues = true
+    }
     buildFeatures {
         compose = true
         buildConfig = true
@@ -101,10 +194,18 @@ android {
 androidComponents {
     onVariants { variant ->
         variant.sources.assets?.addGeneratedSourceDirectory(bundleSkills, BundleSkills::outputDir)
+        variant.sources.assets?.addGeneratedSourceDirectory(bundleCapabilities, BundleCapabilities::outputDir)
     }
 }
 
+// Style checks run on their own (`./gradlew ktlintCheck`); the plugin hooks them into `check`, not `assemble`.
+ktlint {
+    version.set(libs.versions.ktlint)
+    // Rule configuration lives in .editorconfig; the build only picks the engine version and rulesets.
+}
+
 dependencies {
+    ktlintRuleset(libs.ktlint.compose.rules)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -118,4 +219,6 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    testImplementation(libs.junit)
+    testImplementation(libs.org.json)
 }

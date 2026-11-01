@@ -10,14 +10,21 @@
   "packageManager": "pnpm@10.33.2",
   "scripts": {
     "build": "tsc -p .",
-    "typecheck": "tsc -p . --noEmit",
-    "start": "node dist/index.js"
+    "typecheck": "tsc -p . --noEmit && tsc -p test --noEmit",
+    "test": "rm -rf build-test && tsc -p test && node --test \"build-test/test/**/*.test.js\"",
+    "start": "node dist/index.js",
+    "lint": "oxlint --type-aware src test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "jose": "6.2.12"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
+    "oxlint": "1.90.0",
+    "oxlint-tsgolint": "7.0.2005",
+    "prettier": "3.9.10",
     "typescript": "7.0.2"
   }
 }

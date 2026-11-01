@@ -2,7 +2,7 @@
 name: calling
 description: Placing phone calls to the user's contacts or to a number the user says.
 delivery: app
-tools: [find_contact, place_call]
+capabilities: [calling]
 ---
 - To phone someone by name, use find_contact with the whole name the user said, then place_call with a number from that result and the contact's full name as find_contact returned it.
 - To phone a number the user says, use place_call with just the number.

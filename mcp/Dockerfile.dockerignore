@@ -1,0 +1,8 @@
+# The build context is the repo root (-f mcp/Dockerfile). Exclude everything, then allow only what the build needs.
+*
+!mcp/package.json
+!mcp/pnpm-lock.yaml
+!mcp/tsconfig.json
+!mcp/src
+!capabilities
+!skills

@@ -9,11 +9,11 @@ import android.location.Location
 import android.location.LocationManager
 import android.os.CancellationSignal
 import android.util.Log
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import kotlin.coroutines.resume
 import kotlin.math.roundToInt
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * City-level place. Coordinates are rounded to 0.1° (about 10 km) so that nothing more precise is
@@ -38,14 +38,21 @@ interface LocationSource {
 }
 
 /** Coarse fused location; geocoding in both directions uses the platform Geocoder. */
-class PlatformLocationSource(context: Context) : LocationSource {
+class PlatformLocationSource(
+    context: Context,
+) : LocationSource {
     private val appContext = context.applicationContext
     private val locationManager = appContext.getSystemService(LocationManager::class.java)
 
     override suspend fun current(): ApproximateLocation? {
         if (appContext.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return null
         val location = recentLocation() ?: withTimeoutOrNull(3_000) { freshLocation() } ?: return null
-        val address = withTimeoutOrNull(3_000) { geocode { listener -> geocoder().getFromLocation(location.latitude, location.longitude, 1, listener) } }
+        val address =
+            withTimeoutOrNull(3_000) {
+                geocode { listener ->
+                    geocoder().getFromLocation(location.latitude, location.longitude, 1, listener)
+                }
+            }
         return approximate(address, location.latitude, location.longitude)
     }
 
@@ -54,7 +61,11 @@ class PlatformLocationSource(context: Context) : LocationSource {
         return approximate(address, address.latitude, address.longitude)
     }
 
-    private fun approximate(address: Address?, latitude: Double, longitude: Double) = ApproximateLocation(
+    private fun approximate(
+        address: Address?,
+        latitude: Double,
+        longitude: Double,
+    ) = ApproximateLocation(
         city = address?.locality ?: address?.subAdminArea,
         region = address?.adminArea,
         countryCode = address?.countryCode,
@@ -64,29 +75,33 @@ class PlatformLocationSource(context: Context) : LocationSource {
 
     @Suppress("MissingPermission") // checked in current()
     private fun recentLocation(): Location? =
-        locationManager.getLastKnownLocation(LocationManager.FUSED_PROVIDER)
+        locationManager
+            .getLastKnownLocation(LocationManager.FUSED_PROVIDER)
             ?.takeIf { System.currentTimeMillis() - it.time < 30 * 60_000 }
 
     @Suppress("MissingPermission") // checked in current()
-    private suspend fun freshLocation(): Location? = suspendCancellableCoroutine { cont ->
-        val signal = CancellationSignal()
-        cont.invokeOnCancellation { signal.cancel() }
-        locationManager.getCurrentLocation(LocationManager.FUSED_PROVIDER, signal, appContext.mainExecutor) { cont.resume(it) }
-    }
+    private suspend fun freshLocation(): Location? =
+        suspendCancellableCoroutine { cont ->
+            val signal = CancellationSignal()
+            cont.invokeOnCancellation { signal.cancel() }
+            locationManager.getCurrentLocation(LocationManager.FUSED_PROVIDER, signal, appContext.mainExecutor) { cont.resume(it) }
+        }
 
     private fun geocoder() = Geocoder(appContext, Locale.getDefault())
 
     private suspend fun geocode(request: (Geocoder.GeocodeListener) -> Unit): Address? {
         if (!Geocoder.isPresent()) return null
         return suspendCancellableCoroutine { cont ->
-            request(object : Geocoder.GeocodeListener {
-                override fun onGeocode(addresses: MutableList<Address>) = cont.resume(addresses.firstOrNull())
+            request(
+                object : Geocoder.GeocodeListener {
+                    override fun onGeocode(addresses: MutableList<Address>) = cont.resume(addresses.firstOrNull())
 
-                override fun onError(errorMessage: String?) {
-                    Log.w(TAG, "Geocoding failed: $errorMessage")
-                    cont.resume(null)
-                }
-            })
+                    override fun onError(errorMessage: String?) {
+                        Log.w(TAG, "Geocoding failed: $errorMessage")
+                        cont.resume(null)
+                    }
+                },
+            )
         }
     }
 }

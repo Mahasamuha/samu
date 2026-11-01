@@ -52,7 +52,6 @@ import kotlinx.coroutines.launch
 
 /** Explains setup, links to the assistant settings screen, and handles sign-in. */
 class MainActivity : ComponentActivity() {
-
     private val app get() = application as AssistantApp
 
     private var roleHeld by mutableStateOf(false)
@@ -66,40 +65,50 @@ class MainActivity : ComponentActivity() {
     private var home by mutableStateOf("")
     private var voices by mutableStateOf<List<VoiceOption>>(emptyList())
     private var voice by mutableStateOf<String?>(null)
+
     // Plays the samples; the activity is visible, so its own speech is allowed.
     private lateinit var speaker: PlatformSpeaker
     private var work by mutableStateOf("")
+    private var capabilityStatus by mutableStateOf("")
+    private var refreshingCapabilities by mutableStateOf(false)
 
-    private val requestMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        micAllowed = granted
-    }
-
-    private val requestLocation = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        locationAllowed = granted
-    }
-
-    private val requestContacts = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        contactsAllowed = granted
-    }
-
-    private val requestSms = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        smsAllowed = granted
-    }
-
-    private val requestCalls = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        callsAllowed = granted
-    }
-
-    private val requestLocalNetwork = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        localNetworkAllowed = granted
-    }
-
-    private val signIn = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        runReporting("Sign-in") {
-            app.auth.completeSignIn(result.data)
-            "Signed in (token key: ${app.auth.keySecurityLevel()})"
+    private val requestMic =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            micAllowed = granted
         }
-    }
+
+    private val requestLocation =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            locationAllowed = granted
+        }
+
+    private val requestContacts =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            contactsAllowed = granted
+        }
+
+    private val requestSms =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            smsAllowed = granted
+        }
+
+    private val requestCalls =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            callsAllowed = granted
+        }
+
+    private val requestLocalNetwork =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            localNetworkAllowed = granted
+        }
+
+    private val signIn =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            runReporting("Sign-in") {
+                app.auth.completeSignIn(result.data)
+                "Signed in (token key: ${app.auth.keySecurityLevel()})"
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -108,7 +117,14 @@ class MainActivity : ComponentActivity() {
         work = app.savedPlaces.work
         voice = app.voicePreference.name
         speaker = PlatformSpeaker(this)
-        runReporting("Voices") { voices = speaker.voices(); null }
+        runReporting("Voices") {
+            voices = speaker.voices()
+            null
+        }
+        runReporting("Capabilities") {
+            capabilityStatus = describeCapabilityCache()
+            null
+        }
         setContent {
             val signedIn by app.auth.signedIn.collectAsState()
             AssistantTheme {
@@ -125,14 +141,34 @@ class MainActivity : ComponentActivity() {
                     message = message,
                     home = home,
                     work = work,
-                    onHomeChange = { home = it; app.savedPlaces.home = it },
-                    onWorkChange = { work = it; app.savedPlaces.work = it },
+                    onHomeChange = {
+                        home = it
+                        app.savedPlaces.home = it
+                    },
+                    onWorkChange = {
+                        work = it
+                        app.savedPlaces.work = it
+                    },
                     voices = voices,
                     voice = voice,
                     onPickVoice = ::pickVoice,
                     onOpenAssistantSettings = { open(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) },
-                    onSignIn = { runReporting("Sign-in") { signIn.launch(app.auth.signInIntent()); null } },
-                    onSignOut = { runReporting("Sign-out") { app.auth.signOut(); "Signed out" } },
+                    onSignIn = {
+                        runReporting("Sign-in") {
+                            signIn.launch(app.auth.signInIntent())
+                            null
+                        }
+                    },
+                    onSignOut = {
+                        runReporting("Sign-out") {
+                            app.auth.signOut()
+                            capabilityStatus = describeCapabilityCache()
+                            "Signed out"
+                        }
+                    },
+                    capabilityStatus = capabilityStatus,
+                    refreshingCapabilities = refreshingCapabilities,
+                    onRefreshCapabilities = ::refreshCapabilities,
                     onAllowMic = { requestMic.launch(Manifest.permission.RECORD_AUDIO) },
                     onAllowLocation = { requestLocation.launch(Manifest.permission.ACCESS_COARSE_LOCATION) },
                     onAllowContacts = { requestContacts.launch(Manifest.permission.READ_CONTACTS) },
@@ -172,8 +208,44 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Fetches the capability index now and shows the outcome. */
+    private fun refreshCapabilities() {
+        if (refreshingCapabilities) return
+        refreshingCapabilities = true
+        runReporting("Capabilities") {
+            try {
+                val result = app.capabilityCache.refresh()
+                capabilityStatus = describeCapabilityCache()
+                result.fold(
+                    onSuccess = { "Capabilities updated (${it.capabilities.size} from the server)" },
+                    onFailure = { "Refresh failed: ${it.message ?: it.javaClass.simpleName}" },
+                )
+            } finally {
+                refreshingCapabilities = false
+            }
+        }
+    }
+
+    private suspend fun describeCapabilityCache(): String {
+        val index =
+            app.capabilityCache.current()
+                ?: return "Not fetched yet. Using the built-in capabilities."
+        val minutes = index.ageMillis() / 60_000
+        val age =
+            when {
+                minutes < 1 -> "just now"
+                minutes < 60 -> "$minutes min ago"
+                minutes < 24 * 60 -> "${minutes / 60} h ago"
+                else -> "${minutes / (24 * 60)} d ago"
+            }
+        return "Cached index, updated $age (${index.capabilities.size} remote or hybrid capabilities)."
+    }
+
     /** UI boundary: runs [block] and shows its result, or the error, as the status message. */
-    private fun runReporting(label: String, block: suspend () -> String?) {
+    private fun runReporting(
+        label: String,
+        block: suspend () -> String?,
+    ) {
         lifecycleScope.launch {
             try {
                 block()?.let { message = it }
@@ -221,6 +293,9 @@ private fun SetupScreen(
     onOpenAssistantSettings: () -> Unit,
     onSignIn: () -> Unit,
     onSignOut: () -> Unit,
+    capabilityStatus: String,
+    refreshingCapabilities: Boolean,
+    onRefreshCapabilities: () -> Unit,
     onAllowMic: () -> Unit,
     onAllowLocation: () -> Unit,
     onAllowContacts: () -> Unit,
@@ -229,25 +304,32 @@ private fun SetupScreen(
     onAllowLocalNetwork: () -> Unit,
 ) {
     val colors = AppTheme.colors
-    val next = when {
-        !roleHeld -> Step.Role
-        !signedIn -> Step.SignIn
-        !micAllowed -> Step.Mic
-        !locationAllowed -> Step.Location
-        !contactsAllowed -> Step.Contacts
-        !smsAllowed -> Step.Sms
-        !callsAllowed -> Step.Calls
-        !localNetworkAllowed -> Step.LocalNetwork
-        else -> Step.None
-    }
+    val next =
+        when {
+            !roleHeld -> Step.Role
+            !signedIn -> Step.SignIn
+            !micAllowed -> Step.Mic
+            !locationAllowed -> Step.Location
+            !contactsAllowed -> Step.Contacts
+            !smsAllowed -> Step.Sms
+            !callsAllowed -> Step.Calls
+            !localNetworkAllowed -> Step.LocalNetwork
+            else -> Step.None
+        }
 
     // The next missing step gets the one filled button; the rest are outlined so they still read as buttons.
     @Composable
-    fun Action(step: Step, label: String, onClick: () -> Unit) =
-        if (step == next) PrimaryButton(label, onClick) else SecondaryButton(label, onClick)
+    fun Action(
+        step: Step,
+        label: String,
+        onClick: () -> Unit,
+    ) = if (step == next) PrimaryButton(label, onClick) else SecondaryButton(label, onClick)
 
     @Composable
-    fun Status(done: Boolean, text: String) = Row(
+    fun Status(
+        done: Boolean,
+        text: String,
+    ) = Row(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -257,10 +339,11 @@ private fun SetupScreen(
 
     Surface(modifier = Modifier.fillMaxSize(), color = colors.surface) {
         Column(
-            modifier = Modifier
-                .safeDrawingPadding()
-                .verticalScroll(rememberScrollState())
-                .padding(24.dp),
+            modifier =
+                Modifier
+                    .safeDrawingPadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -291,37 +374,65 @@ private fun SetupScreen(
             if (signedIn) GhostButton("sign out", onSignOut) else Action(Step.SignIn, "sign in →", onSignIn)
 
             Hairline()
+            MonoLabel("capabilities")
+            Text(
+                "What Samu can do beyond the built-in tools comes from the server, and is kept on this phone. " +
+                    "Refresh it here after changing the server.",
+                style = AppType.body,
+                color = colors.textBody,
+            )
+            Text(capabilityStatus, style = AppType.caption, color = colors.textMuted)
+            if (signedIn) {
+                GhostButton(if (refreshingCapabilities) "refreshing…" else "refresh capabilities", onRefreshCapabilities)
+            }
+
+            Hairline()
             MonoLabel("permissions")
             Status(micAllowed, if (micAllowed) "Microphone allowed." else "The assistant needs the microphone.")
             if (!micAllowed) Action(Step.Mic, "allow microphone", onAllowMic)
             Status(
                 locationAllowed,
-                if (locationAllowed) "Approximate location allowed (city level, for local answers)."
-                else "Optional: approximate location, so questions like the weather know your city.",
+                if (locationAllowed) {
+                    "Approximate location allowed (city level, for local answers)."
+                } else {
+                    "Optional: approximate location, so questions like the weather know your city."
+                },
             )
             if (!locationAllowed) Action(Step.Location, "allow approximate location", onAllowLocation)
             Status(
                 contactsAllowed,
-                if (contactsAllowed) "Contacts allowed (only matched names and numbers leave the phone)."
-                else "Optional: contacts, so you can text or call people by name.",
+                if (contactsAllowed) {
+                    "Contacts allowed (only matched names and numbers leave the phone)."
+                } else {
+                    "Optional: contacts, so you can text or call people by name."
+                },
             )
             if (!contactsAllowed) Action(Step.Contacts, "allow contacts", onAllowContacts)
             Status(
                 smsAllowed,
-                if (smsAllowed) "Texting allowed. Every text is read back for your confirmation first."
-                else "Optional: sending texts, always after you confirm.",
+                if (smsAllowed) {
+                    "Texting allowed. Every text is read back for your confirmation first."
+                } else {
+                    "Optional: sending texts, always after you confirm."
+                },
             )
             if (!smsAllowed) Action(Step.Sms, "allow texting", onAllowSms)
             Status(
                 callsAllowed,
-                if (callsAllowed) "Calling allowed. Calls are announced, or confirmed first when the contact isn't certain or after a search."
-                else "Optional: placing calls.",
+                if (callsAllowed) {
+                    "Calling allowed. Calls are announced, or confirmed first when the contact isn't certain or after a search."
+                } else {
+                    "Optional: placing calls."
+                },
             )
             if (!callsAllowed) Action(Step.Calls, "allow calling", onAllowCalls)
             Status(
                 localNetworkAllowed,
-                if (localNetworkAllowed) "Speakers allowed (finds Sonos and Cast speakers on home Wi-Fi)."
-                else "Optional: local network, to find Sonos and Cast speakers on home Wi-Fi to play music on.",
+                if (localNetworkAllowed) {
+                    "Speakers allowed (finds Sonos and Cast speakers on home Wi-Fi)."
+                } else {
+                    "Optional: local network, to find Sonos and Cast speakers on home Wi-Fi to play music on."
+                },
             )
             if (!localNetworkAllowed) Action(Step.LocalNetwork, "allow speakers", onAllowLocalNetwork)
 
@@ -358,8 +469,12 @@ private fun SetupScreen(
                 style = AppType.body,
                 color = colors.textBody,
             )
+
             @Composable
-            fun VoiceRow(name: String?, label: String) = Row(
+            fun VoiceRow(
+                name: String?,
+                label: String,
+            ) = Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth().clickable { onPickVoice(name) },

@@ -10,7 +10,6 @@ const val TAG = "Assistant"
  * created by [AssistantSessionService]; this service only needs to exist.
  */
 class AssistantService : VoiceInteractionService() {
-
     override fun onReady() {
         super.onReady()
         Log.i(TAG, "AssistantService.onReady")

@@ -10,8 +10,10 @@ import android.util.Log
  * uses the platform's on-device recognizer, not this service.
  */
 class StubRecognitionService : RecognitionService() {
-
-    override fun onStartListening(recognizerIntent: Intent, listener: Callback) {
+    override fun onStartListening(
+        recognizerIntent: Intent,
+        listener: Callback,
+    ) {
         Log.i(TAG, "StubRecognitionService.onStartListening (not implemented)")
         listener.error(SpeechRecognizer.ERROR_CLIENT)
     }

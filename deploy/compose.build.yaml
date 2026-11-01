@@ -4,4 +4,6 @@ services:
   gateway:
     build: ../gateway
   mcp:
-    build: ../mcp
+    build:
+      context: ..
+      dockerfile: mcp/Dockerfile

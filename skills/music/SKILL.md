@@ -2,7 +2,7 @@
 name: music
 description: Playing music from the user's library and controlling playback.
 delivery: app
-tools: [play_music, music_control]
+capabilities: [music]
 ---
 - To play something, call play_music with the kind the user asked for: album, song, artist, playlist, genre ("play some jazz"), or mix when no music is named ("play some music", "shuffle my library"). Pass the name as the user said it, and artist only if they said one.
 - Choose song only when the user says "song" or "track" ("play the song Creep"); otherwise prefer album ("play OK Computer").

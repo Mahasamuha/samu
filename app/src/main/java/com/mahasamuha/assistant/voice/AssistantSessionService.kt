@@ -6,7 +6,6 @@ import android.service.voice.VoiceInteractionSessionService
 import android.util.Log
 
 class AssistantSessionService : VoiceInteractionSessionService() {
-
     override fun onNewSession(args: Bundle?): VoiceInteractionSession {
         Log.i(TAG, "AssistantSessionService.onNewSession")
         return AssistantSession(this)

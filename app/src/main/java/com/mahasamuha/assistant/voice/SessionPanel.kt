@@ -1,12 +1,13 @@
 package com.mahasamuha.assistant.voice
 
 import android.net.Uri
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -18,7 +19,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.border
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,8 +28,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -60,40 +60,44 @@ fun SessionPanel(
     onAnswer: (confirmed: Boolean) -> Unit,
     onOpenSource: (url: String) -> Unit,
     onClose: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
     BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxSize()
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClose,
-            ),
+        modifier =
+            modifier
+                .fillMaxSize()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onClose,
+                ),
         contentAlignment = Alignment.BottomCenter,
     ) {
         // Starts as small as its content and grows upward with the conversation, up to two thirds of the screen.
         val maxPanelHeight = maxHeight * 2 / 3
         Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = maxPanelHeight)
-                .animateContentSize()
-                // Swallow taps on the panel itself so they don't close it.
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = {},
-                ),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = maxPanelHeight)
+                    .animateContentSize()
+                    // Swallow taps on the panel itself so they don't close it.
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {},
+                    ),
             shape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp),
             color = colors.panel,
             border = colors.panelEdge?.let { BorderStroke(1.dp, it) },
             shadowElevation = 16.dp,
         ) {
             Column(
-                modifier = Modifier
-                    .navigationBarsPadding()
-                    .padding(horizontal = 24.dp, vertical = 22.dp),
+                modifier =
+                    Modifier
+                        .navigationBarsPadding()
+                        .padding(horizontal = 24.dp, vertical = 22.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -130,7 +134,11 @@ fun SessionPanel(
 
 /** The conversation so far as bubbles, kept scrolled to the newest; words still being heard show faded. */
 @Composable
-private fun Transcript(state: PanelState, onOpenSource: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun Transcript(
+    state: PanelState,
+    onOpenSource: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val listState = rememberLazyListState()
     // The bubble whose source list is open, by transcript index.
     var openSources by remember { mutableStateOf<Int?>(null) }
@@ -148,13 +156,21 @@ private fun Transcript(state: PanelState, onOpenSource: (String) -> Unit, modifi
     ) {
         itemsIndexed(state.transcript) { index, message ->
             when {
-                message.note -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { MonoLabel(message.text) }
-                message.sources.isEmpty() -> Bubble(message.text, message.fromUser)
-                else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Bubble(message.text, message.fromUser, sources = message.sources.size, onSources = {
-                        openSources = if (openSources == index) null else index
-                    })
-                    if (openSources == index) SourceList(message.sources, onOpenSource)
+                message.note -> {
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { MonoLabel(message.text) }
+                }
+
+                message.sources.isEmpty() -> {
+                    Bubble(message.text, message.fromUser)
+                }
+
+                else -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Bubble(message.text, message.fromUser, sources = message.sources.size, onSources = {
+                            openSources = if (openSources == index) null else index
+                        })
+                        if (openSources == index) SourceList(message.sources, onOpenSource)
+                    }
                 }
             }
         }
@@ -176,15 +192,22 @@ private fun Bubble(
     sources: Int = 0,
     onSources: () -> Unit = {},
 ) {
-    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = if (fromUser) Alignment.CenterEnd else Alignment.CenterStart) {
-        Box(Modifier.fillMaxWidth(if (fromUser) 0.78f else 0.92f), contentAlignment = if (fromUser) Alignment.CenterEnd else Alignment.CenterStart) {
+    Box(modifier = modifier.fillMaxWidth(), contentAlignment = if (fromUser) Alignment.CenterEnd else Alignment.CenterStart) {
+        Box(
+            Modifier.fillMaxWidth(if (fromUser) 0.78f else 0.92f),
+            contentAlignment = if (fromUser) Alignment.CenterEnd else Alignment.CenterStart,
+        ) {
             if (sources == 0) {
-                ChatBubble(text, fromUser = fromUser, modifier = modifier)
+                ChatBubble(text, fromUser = fromUser)
             } else {
                 // The sources pill hangs off the bubble's tail corner, the way reactions sit on a chat bubble.
                 Box {
-                    ChatBubble(text, fromUser = fromUser, modifier = modifier.padding(bottom = 12.dp))
-                    SourcesPill(sources, onSources, Modifier.align(if (fromUser) Alignment.BottomEnd else Alignment.BottomStart).padding(horizontal = 10.dp))
+                    ChatBubble(text, fromUser = fromUser, modifier = Modifier.padding(bottom = 12.dp))
+                    SourcesPill(
+                        sources,
+                        onSources,
+                        Modifier.align(if (fromUser) Alignment.BottomEnd else Alignment.BottomStart).padding(horizontal = 10.dp),
+                    )
                 }
             }
         }
@@ -193,17 +216,22 @@ private fun Bubble(
 
 /** "↗ 9": the number of pages behind a search answer; tap to list them. */
 @Composable
-private fun SourcesPill(count: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun SourcesPill(
+    count: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = AppTheme.colors
     Box(
-        modifier = modifier
-            .shadow(2.dp, RoundedCornerShape(999.dp))
-            .background(colors.panel, RoundedCornerShape(999.dp))
-            .border(1.dp, colors.divider, RoundedCornerShape(999.dp))
-            .clip(RoundedCornerShape(999.dp))
-            .clickable(onClickLabel = "show sources", onClick = onClick)
-            .semantics { contentDescription = "$count sources" }
-            .padding(horizontal = 10.dp, vertical = 4.dp),
+        modifier =
+            modifier
+                .shadow(2.dp, RoundedCornerShape(999.dp))
+                .background(colors.panel, RoundedCornerShape(999.dp))
+                .border(1.dp, colors.divider, RoundedCornerShape(999.dp))
+                .clip(RoundedCornerShape(999.dp))
+                .clickable(onClickLabel = "show sources", onClick = onClick)
+                .semantics { contentDescription = "$count sources" }
+                .padding(horizontal = 10.dp, vertical = 4.dp),
     ) {
         MonoLabel("↗ $count")
     }
@@ -211,24 +239,35 @@ private fun SourcesPill(count: Int, onClick: () -> Unit, modifier: Modifier = Mo
 
 /** A reply's sources in an inset well under the bubble; tapping one opens it in the browser. */
 @Composable
-private fun SourceList(sources: List<SourceLink>, onOpen: (String) -> Unit) {
+private fun SourceList(
+    sources: List<SourceLink>,
+    onOpen: (String) -> Unit,
+) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth(0.92f)
-            .background(AppTheme.colors.inset, RoundedCornerShape(10.dp))
-            .padding(vertical = 8.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth(0.92f)
+                .background(AppTheme.colors.inset, RoundedCornerShape(10.dp))
+                .padding(vertical = 8.dp),
     ) {
         MonoLabel("sources", Modifier.padding(horizontal = 14.dp, vertical = 4.dp))
         sources.forEach { source ->
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpen(source.url) }
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpen(source.url) }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 Text(source.title, style = AppType.caption, color = AppTheme.colors.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                MonoLabel(Uri.parse(source.url).host.orEmpty().removePrefix("www."))
+                MonoLabel(
+                    Uri
+                        .parse(source.url)
+                        .host
+                        .orEmpty()
+                        .removePrefix("www."),
+                )
             }
         }
     }
@@ -236,12 +275,16 @@ private fun SourceList(sources: List<SourceLink>, onOpen: (String) -> Unit) {
 
 /** The action waiting on the user, in an inset well: confirm or cancel for an ask, cancel for an announcement. */
 @Composable
-private fun ConfirmationCard(confirmation: Confirmation, onAnswer: (Boolean) -> Unit) {
+private fun ConfirmationCard(
+    confirmation: Confirmation,
+    onAnswer: (Boolean) -> Unit,
+) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(AppTheme.colors.inset, RoundedCornerShape(10.dp))
-            .padding(16.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .background(AppTheme.colors.inset, RoundedCornerShape(10.dp))
+                .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         MonoLabel(if (confirmation is Confirmation.Ask) "confirm" else "about to")
@@ -253,13 +296,19 @@ private fun ConfirmationCard(confirmation: Confirmation, onAnswer: (Boolean) -> 
     }
 }
 
-private fun statusText(state: PanelState): String = when {
-    state.confirming is Confirmation.Ask && state.phase == Phase.Listening -> "say yes or no"
-    else -> when (state.phase) {
-        Phase.Starting -> "…"
-        Phase.Listening -> "listening…"
-        Phase.Thinking -> "thinking…"
-        Phase.Speaking -> "speaking"
-        Phase.Idle -> "ready"
+private fun statusText(state: PanelState): String =
+    when {
+        state.confirming is Confirmation.Ask && state.phase == Phase.Listening -> {
+            "say yes or no"
+        }
+
+        else -> {
+            when (state.phase) {
+                Phase.Starting -> "…"
+                Phase.Listening -> "listening…"
+                Phase.Thinking -> "thinking…"
+                Phase.Speaking -> "speaking"
+                Phase.Idle -> "ready"
+            }
+        }
     }
-}

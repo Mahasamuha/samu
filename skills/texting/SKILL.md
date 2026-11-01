@@ -2,7 +2,7 @@
 name: texting
 description: Sending text messages to the user's contacts.
 delivery: app
-tools: [find_contact, send_sms]
+capabilities: [texting]
 ---
 - To text someone, call find_contact with the whole name the user said ("Sam Lee", not just "Sam"), then send_sms with a number from that result.
 - Use a mobile number unless the user names another type. If the contact has no mobile number, ask whether to use one of the numbers it does have.

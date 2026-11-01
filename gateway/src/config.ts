@@ -61,25 +61,44 @@ function url(env: NodeJS.ProcessEnv, name: string): string {
 /** Signing keys come from here, so plain http is refused. Upstream URLs stay http on the private network. */
 function httpsUrl(env: NodeJS.ProcessEnv, name: string): string {
   const value = url(env, name);
-  if (new URL(value).protocol !== "https:") throw new ConfigError(`${name} must be an https URL`);
+  if (new URL(value).protocol !== "https:")
+    throw new ConfigError(`${name} must be an https URL`);
   return value;
 }
 
-function integer(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
+function integer(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  fallback: number,
+): number {
   const raw = env[name];
   if (raw === undefined || raw === "") return fallback;
   const value = Number(raw);
-  if (!Number.isInteger(value) || value < 0) throw new ConfigError(`${name} must be a non-negative integer`);
+  if (!Number.isInteger(value) || value < 0)
+    throw new ConfigError(`${name} must be a non-negative integer`);
   return value;
 }
 
-const DURATION_UNITS_MS = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 } as const;
+const DURATION_UNITS_MS = {
+  s: 1_000,
+  m: 60_000,
+  h: 3_600_000,
+  d: 86_400_000,
+} as const;
 
 /** Parses "0", "90s", "30m", "24h", "7d". */
-function duration(env: NodeJS.ProcessEnv, name: string, fallback: string): number {
+function duration(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  fallback: string,
+): number {
   const raw = env[name] || fallback;
   if (raw === "0") return 0;
   const match = /^(\d+)([smhd])$/.exec(raw);
-  if (!match) throw new ConfigError(`${name} must look like 30m, 24h or 7d (or 0)`);
-  return Number(match[1]) * DURATION_UNITS_MS[match[2] as keyof typeof DURATION_UNITS_MS];
+  if (!match)
+    throw new ConfigError(`${name} must look like 30m, 24h or 7d (or 0)`);
+  return (
+    Number(match[1]) *
+    DURATION_UNITS_MS[match[2] as keyof typeof DURATION_UNITS_MS]
+  );
 }

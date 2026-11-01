@@ -9,11 +9,6 @@ import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.util.Log
 import com.mahasamuha.assistant.voice.TAG
-import java.io.ByteArrayOutputStream
-import java.io.InputStream
-import java.net.Inet4Address
-import java.net.InetSocketAddress
-import java.net.Socket
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -22,12 +17,22 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
+import java.net.Inet4Address
+import java.net.InetSocketAddress
+import java.net.Socket
 
 /**
  * A speaker Symfonium can play to: [type] and [identifier] are its renderer type and ID for SELECT_RENDERER.
  * [aliases] are other names that also select it (the other members of a Sonos group).
  */
-data class CastSpeaker(val name: String, val type: Int, val identifier: String, val aliases: List<String> = emptyList())
+data class CastSpeaker(
+    val name: String,
+    val type: Int,
+    val identifier: String,
+    val aliases: List<String> = emptyList(),
+)
 
 /**
  * Finds the cast speakers on the current Wi-Fi network (Sonos groups and Google Cast devices) with
@@ -35,13 +40,18 @@ data class CastSpeaker(val name: String, val type: Int, val identifier: String, 
  *
  * Nothing about the speakers (names, identifiers, addresses) is logged.
  */
-class SpeakerDirectory(context: Context) {
+class SpeakerDirectory(
+    context: Context,
+) {
     private val appContext = context.applicationContext
     private val connectivity = appContext.getSystemService(ConnectivityManager::class.java)
     private val nsd = appContext.getSystemService(NsdManager::class.java)
 
     /** A resolved mDNS service: first IPv4 address (if any) and its TXT records as strings. */
-    private class Resolved(val ip: String?, val txt: Map<String, String>)
+    private class Resolved(
+        val ip: String?,
+        val txt: Map<String, String>,
+    )
 
     /**
      * Speakers on the current Wi-Fi network, sorted by name.
@@ -62,20 +72,27 @@ class SpeakerDirectory(context: Context) {
 
         val result = mutableListOf<CastSpeaker>()
 
-        val castSpeakers = casts.mapNotNull { r ->
-            val id = r.txt["id"]?.takeIf { it.isNotBlank() }
-            val name = r.txt["fn"]?.takeIf { it.isNotBlank() }
-            if (id != null && name != null) CastSpeaker(name, CHROMECAST, id) else null
-        }.distinctBy { it.identifier }
+        val castSpeakers =
+            casts
+                .mapNotNull { r ->
+                    val id = r.txt["id"]?.takeIf { it.isNotBlank() }
+                    val name = r.txt["fn"]?.takeIf { it.isNotBlank() }
+                    if (id != null && name != null) CastSpeaker(name, CHROMECAST, id) else null
+                }.distinctBy { it.identifier }
         result += castSpeakers
 
         val sonosIp = sonosPlayers.firstNotNullOfOrNull { it.ip }
-        val sonosGroups = if (sonosIp == null) emptyList() else try {
-            sonosGroups(sonosIp)
-        } catch (e: Exception) {
-            Log.i(TAG, "Sonos group lookup failed: ${e.javaClass.simpleName}")
-            emptyList()
-        }
+        val sonosGroups =
+            if (sonosIp == null) {
+                emptyList()
+            } else {
+                try {
+                    sonosGroups(sonosIp)
+                } catch (e: Exception) {
+                    Log.i(TAG, "Sonos group lookup failed: ${e.javaClass.simpleName}")
+                    emptyList()
+                }
+            }
         result += sonosGroups
 
         Log.i(TAG, "Speakers: ${sonosGroups.size} Sonos groups, ${castSpeakers.size} Cast devices")
@@ -83,29 +100,50 @@ class SpeakerDirectory(context: Context) {
     }
 
     /** Browses both service types for a short window, then resolves what was found. Pairs are (service type, resolved info). */
-    private suspend fun discover(): List<Pair<String, Resolved?>> = coroutineScope {
-        val sonos = async { browse(SONOS_SERVICE) }
-        val cast = async { browse(CAST_SERVICE) }
-        val services = sonos.await().map { SONOS_SERVICE to it } + cast.await().map { CAST_SERVICE to it }
-        services.map { (type, info) -> async { type to withTimeoutOrNull(RESOLVE_TIMEOUT_MS) { resolve(info) } } }.awaitAll()
-    }
+    private suspend fun discover(): List<Pair<String, Resolved?>> =
+        coroutineScope {
+            val sonos = async { browse(SONOS_SERVICE) }
+            val cast = async { browse(CAST_SERVICE) }
+            val services = sonos.await().map { SONOS_SERVICE to it } + cast.await().map { CAST_SERVICE to it }
+            services.map { (type, info) -> async { type to withTimeoutOrNull(RESOLVE_TIMEOUT_MS) { resolve(info) } } }.awaitAll()
+        }
 
     /** Services of [type] seen during the discovery window. */
     private suspend fun browse(type: String): List<NsdServiceInfo> {
         val services = java.util.Collections.synchronizedList(mutableListOf<NsdServiceInfo>())
-        val listener = object : NsdManager.DiscoveryListener {
-            override fun onDiscoveryStarted(serviceType: String) {}
-            override fun onServiceFound(serviceInfo: NsdServiceInfo) { services += serviceInfo }
-            override fun onServiceLost(serviceInfo: NsdServiceInfo) {}
-            override fun onDiscoveryStopped(serviceType: String) {}
-            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) { Log.i(TAG, "Discovery failed: $errorCode") }
-            override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {}
-        }
+        val listener =
+            object : NsdManager.DiscoveryListener {
+                override fun onDiscoveryStarted(serviceType: String) {}
+
+                override fun onServiceFound(serviceInfo: NsdServiceInfo) {
+                    services += serviceInfo
+                }
+
+                override fun onServiceLost(serviceInfo: NsdServiceInfo) {}
+
+                override fun onDiscoveryStopped(serviceType: String) {}
+
+                override fun onStartDiscoveryFailed(
+                    serviceType: String,
+                    errorCode: Int,
+                ) {
+                    Log.i(TAG, "Discovery failed: $errorCode")
+                }
+
+                override fun onStopDiscoveryFailed(
+                    serviceType: String,
+                    errorCode: Int,
+                ) {}
+            }
         nsd.discoverServices(type, NsdManager.PROTOCOL_DNS_SD, listener)
         try {
             delay(DISCOVERY_WINDOW_MS)
         } finally {
-            try { nsd.stopServiceDiscovery(listener) } catch (_: IllegalArgumentException) { /* discovery never started */ }
+            try {
+                nsd.stopServiceDiscovery(listener)
+            } catch (_: IllegalArgumentException) {
+                // discovery never started
+            }
         }
         return synchronized(services) { services.toList() }
     }
@@ -113,18 +151,28 @@ class SpeakerDirectory(context: Context) {
     /** Resolves [service] to its addresses and TXT records via the API 34+ service-info callback. */
     private suspend fun resolve(service: NsdServiceInfo): Resolved? {
         val result = CompletableDeferred<Resolved?>()
-        val callback = object : NsdManager.ServiceInfoCallback {
-            override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) { result.complete(null) }
+        val callback =
+            object : NsdManager.ServiceInfoCallback {
+                override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) {
+                    result.complete(null)
+                }
 
-            override fun onServiceUpdated(serviceInfo: NsdServiceInfo) {
-                val ip = serviceInfo.hostAddresses.filterIsInstance<Inet4Address>().firstOrNull()?.hostAddress
-                val txt = serviceInfo.attributes.mapValues { (_, v) -> v?.toString(Charsets.UTF_8).orEmpty() }
-                result.complete(Resolved(ip, txt))
+                override fun onServiceUpdated(serviceInfo: NsdServiceInfo) {
+                    val ip =
+                        serviceInfo.hostAddresses
+                            .filterIsInstance<Inet4Address>()
+                            .firstOrNull()
+                            ?.hostAddress
+                    val txt = serviceInfo.attributes.mapValues { (_, v) -> v?.toString(Charsets.UTF_8).orEmpty() }
+                    result.complete(Resolved(ip, txt))
+                }
+
+                override fun onServiceLost() {
+                    result.complete(null)
+                }
+
+                override fun onServiceInfoCallbackUnregistered() {}
             }
-
-            override fun onServiceLost() { result.complete(null) }
-            override fun onServiceInfoCallbackUnregistered() {}
-        }
         nsd.registerServiceInfoCallback(service, appContext.mainExecutor, callback)
         try {
             return result.await()
@@ -134,7 +182,11 @@ class SpeakerDirectory(context: Context) {
     }
 
     private fun unregister(callback: NsdManager.ServiceInfoCallback) {
-        try { nsd.unregisterServiceInfoCallback(callback) } catch (_: IllegalArgumentException) { /* already unregistered */ }
+        try {
+            nsd.unregisterServiceInfoCallback(callback)
+        } catch (_: IllegalArgumentException) {
+            // already unregistered
+        }
     }
 
     /**
@@ -146,23 +198,35 @@ class SpeakerDirectory(context: Context) {
      * policy does not govern raw sockets, and this is one fixed request to a LAN device, so a
      * minimal hand-written HTTP/1.1 exchange is simpler than weakening the app's policy.
      */
-    private suspend fun sonosGroups(ip: String): List<CastSpeaker> = withContext(Dispatchers.IO) {
-        val body = """<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:GetZoneGroupState xmlns:u="urn:schemas-upnp-org:service:ZoneGroupTopology:1"/></s:Body></s:Envelope>"""
-        val payload = body.toByteArray(Charsets.UTF_8)
-        val request = "POST /ZoneGroupTopology/Control HTTP/1.1\r\n" +
-            "Host: $ip:1400\r\n" +
-            "Content-Type: text/xml; charset=\"utf-8\"\r\n" +
-            "SOAPACTION: \"urn:schemas-upnp-org:service:ZoneGroupTopology:1#GetZoneGroupState\"\r\n" +
-            "Content-Length: ${payload.size}\r\n" +
-            "Connection: close\r\n\r\n"
-        val raw = Socket().use { socket ->
-            socket.connect(InetSocketAddress(ip, 1400), 2_000)
-            socket.soTimeout = 3_000
-            socket.getOutputStream().apply { write(request.toByteArray(Charsets.ISO_8859_1)); write(payload); flush() }
-            socket.getInputStream().readAllBytesCompat()
+    private suspend fun sonosGroups(ip: String): List<CastSpeaker> =
+        withContext(Dispatchers.IO) {
+            val body =
+                """<?xml version="1.0"?>""" +
+                    """<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" """ +
+                    """s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">""" +
+                    """<s:Body><u:GetZoneGroupState xmlns:u="urn:schemas-upnp-org:service:ZoneGroupTopology:1"/></s:Body>""" +
+                    """</s:Envelope>"""
+            val payload = body.toByteArray(Charsets.UTF_8)
+            val request =
+                "POST /ZoneGroupTopology/Control HTTP/1.1\r\n" +
+                    "Host: $ip:1400\r\n" +
+                    "Content-Type: text/xml; charset=\"utf-8\"\r\n" +
+                    "SOAPACTION: \"urn:schemas-upnp-org:service:ZoneGroupTopology:1#GetZoneGroupState\"\r\n" +
+                    "Content-Length: ${payload.size}\r\n" +
+                    "Connection: close\r\n\r\n"
+            val raw =
+                Socket().use { socket ->
+                    socket.connect(InetSocketAddress(ip, 1400), 2_000)
+                    socket.soTimeout = 3_000
+                    socket.getOutputStream().apply {
+                        write(request.toByteArray(Charsets.ISO_8859_1))
+                        write(payload)
+                        flush()
+                    }
+                    socket.getInputStream().readAllBytesCompat()
+                }
+            parseZoneGroups(httpBody(raw))
         }
-        parseZoneGroups(httpBody(raw))
-    }
 
     private fun InputStream.readAllBytesCompat(): ByteArray {
         val out = ByteArrayOutputStream()
@@ -175,67 +239,90 @@ class SpeakerDirectory(context: Context) {
         return out.toByteArray()
     }
 
-    /** The body of a raw HTTP response, de-chunked when needed. Throws on a non-200 status. */
-    private fun httpBody(raw: ByteArray): String {
-        val separator = byteArrayOf(13, 10, 13, 10)
-        val split = indexOf(raw, separator)
-        check(split >= 0) { "Malformed speaker response" }
-        val headers = String(raw, 0, split, Charsets.ISO_8859_1)
-        val status = headers.lineSequence().first().split(' ').getOrNull(1)
-        check(status == "200") { "Speaker request failed: HTTP $status" }
-        var body = raw.copyOfRange(split + 4, raw.size)
-        if (headers.contains("transfer-encoding: chunked", ignoreCase = true)) body = dechunk(body)
-        return String(body, Charsets.UTF_8)
-    }
-
-    private fun dechunk(data: ByteArray): ByteArray {
-        val out = ByteArrayOutputStream()
-        var pos = 0
-        while (pos < data.size) {
-            val lineEnd = indexOf(data, byteArrayOf(13, 10), pos)
-            if (lineEnd < 0) break
-            val size = String(data, pos, lineEnd - pos, Charsets.ISO_8859_1).substringBefore(';').trim().toIntOrNull(16) ?: break
-            if (size == 0) break
-            val start = lineEnd + 2
-            val end = minOf(start + size, data.size)
-            out.write(data, start, end - start)
-            pos = end + 2
-        }
-        return out.toByteArray()
-    }
-
-    private fun indexOf(data: ByteArray, pattern: ByteArray, from: Int = 0): Int {
-        for (i in from..data.size - pattern.size) {
-            if (pattern.indices.all { data[i + it] == pattern[it] }) return i
-        }
-        return -1
-    }
-
-    /** One CastSpeaker per Sonos group, skipping invisible members (bonded satellites, etc.). */
-    private fun parseZoneGroups(soapBody: String): List<CastSpeaker> {
-        val state = unescape(soapBody.substringAfter("<ZoneGroupState>", "").substringBefore("</ZoneGroupState>"))
-        check(state.isNotEmpty()) { "Speaker response had no zone groups" }
-        return GROUP_REGEX.findAll(state).mapNotNull { group ->
-            val coordinator = attributes(group.groupValues[1])["Coordinator"] ?: return@mapNotNull null
-            val members = MEMBER_REGEX.findAll(group.groupValues[2])
-                .map { attributes(it.groupValues[1]) }
-                .filter { it["Invisible"] != "1" && !it["ZoneName"].isNullOrBlank() }
-                .toList()
-            // Named as the Sonos app does: by the coordinator; the other members are aliases.
-            val lead = members.firstOrNull { it["UUID"] == coordinator } ?: members.firstOrNull() ?: return@mapNotNull null
-            val name = lead.getValue("ZoneName")
-            val aliases = members.map { it.getValue("ZoneName") }.distinct().filter { it != name }.sorted()
-            CastSpeaker(name, UPNP, "${coordinator}_MR", aliases)
-        }.toList()
-    }
-
-    private fun attributes(tag: String): Map<String, String> =
-        ATTRIBUTE_REGEX.findAll(tag).associate { it.groupValues[1] to unescape(it.groupValues[2]) }
-
-    private fun unescape(s: String) = s
-        .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
-
     companion object {
+        /** The body of a raw HTTP response, de-chunked when needed. Throws on a non-200 status. */
+        internal fun httpBody(raw: ByteArray): String {
+            val separator = byteArrayOf(13, 10, 13, 10)
+            val split = indexOf(raw, separator)
+            check(split >= 0) { "Malformed speaker response" }
+            val headers = String(raw, 0, split, Charsets.ISO_8859_1)
+            val status =
+                headers
+                    .lineSequence()
+                    .first()
+                    .split(' ')
+                    .getOrNull(1)
+            check(status == "200") { "Speaker request failed: HTTP $status" }
+            var body = raw.copyOfRange(split + 4, raw.size)
+            if (headers.contains("transfer-encoding: chunked", ignoreCase = true)) body = dechunk(body)
+            return String(body, Charsets.UTF_8)
+        }
+
+        private fun dechunk(data: ByteArray): ByteArray {
+            val out = ByteArrayOutputStream()
+            var pos = 0
+            while (pos < data.size) {
+                val lineEnd = indexOf(data, byteArrayOf(13, 10), pos)
+                if (lineEnd < 0) break
+                val size = String(data, pos, lineEnd - pos, Charsets.ISO_8859_1).substringBefore(';').trim().toIntOrNull(16) ?: break
+                if (size == 0) break
+                val start = lineEnd + 2
+                val end = minOf(start + size, data.size)
+                out.write(data, start, end - start)
+                pos = end + 2
+            }
+            return out.toByteArray()
+        }
+
+        private fun indexOf(
+            data: ByteArray,
+            pattern: ByteArray,
+            from: Int = 0,
+        ): Int {
+            for (i in from..data.size - pattern.size) {
+                if (pattern.indices.all { data[i + it] == pattern[it] }) return i
+            }
+            return -1
+        }
+
+        /** One CastSpeaker per Sonos group, skipping invisible members (bonded satellites, etc.). */
+        internal fun parseZoneGroups(soapBody: String): List<CastSpeaker> {
+            val state = unescape(soapBody.substringAfter("<ZoneGroupState>", "").substringBefore("</ZoneGroupState>"))
+            check(state.isNotEmpty()) { "Speaker response had no zone groups" }
+            return GROUP_REGEX
+                .findAll(state)
+                .mapNotNull { group ->
+                    val coordinator = attributes(group.groupValues[1])["Coordinator"] ?: return@mapNotNull null
+                    val members =
+                        MEMBER_REGEX
+                            .findAll(group.groupValues[2])
+                            .map { attributes(it.groupValues[1]) }
+                            .filter { it["Invisible"] != "1" && !it["ZoneName"].isNullOrBlank() }
+                            .toList()
+                    // Named as the Sonos app does: by the coordinator; the other members are aliases.
+                    val lead = members.firstOrNull { it["UUID"] == coordinator } ?: members.firstOrNull() ?: return@mapNotNull null
+                    val name = lead.getValue("ZoneName")
+                    val aliases =
+                        members
+                            .map { it.getValue("ZoneName") }
+                            .distinct()
+                            .filter { it != name }
+                            .sorted()
+                    CastSpeaker(name, UPNP, "${coordinator}_MR", aliases)
+                }.toList()
+        }
+
+        private fun attributes(tag: String): Map<String, String> =
+            ATTRIBUTE_REGEX.findAll(tag).associate { it.groupValues[1] to unescape(it.groupValues[2]) }
+
+        private fun unescape(s: String) =
+            s
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", "\"")
+                .replace("&apos;", "'")
+                .replace("&amp;", "&")
+
         /** Symfonium renderer type for UPnP (Sonos). */
         const val UPNP = 1
 
@@ -256,12 +343,17 @@ class SpeakerDirectory(context: Context) {
 
         private val IGNORED_WORDS = setOf("the", "speaker", "room")
 
-        private val NUMBER_WORDS = listOf("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")
-            .withIndex().associate { (i, w) -> w to (i + 1).toString() }
+        private val NUMBER_WORDS =
+            listOf("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")
+                .withIndex()
+                .associate { (i, w) -> w to (i + 1).toString() }
 
         /** Lowercase words without filler, with spoken numbers ("one".."ten") as digits. */
         private fun words(s: String): List<String> =
-            s.lowercase().replace(Regex("[^a-z0-9\\s]"), " ").split(Regex("\\s+"))
+            s
+                .lowercase()
+                .replace(Regex("[^a-z0-9\\s]"), " ")
+                .split(Regex("\\s+"))
                 .filter { it.isNotEmpty() && it !in IGNORED_WORDS }
                 .map { NUMBER_WORDS[it] ?: it }
 
@@ -275,7 +367,10 @@ class SpeakerDirectory(context: Context) {
          *
          * @throws IllegalArgumentException when nothing matches or several speakers do; the message names the candidates.
          */
-        fun match(name: String, speakers: List<CastSpeaker>): CastSpeaker {
+        fun match(
+            name: String,
+            speakers: List<CastSpeaker>,
+        ): CastSpeaker {
             // The ambiguity question shows labels like "Office 1 (with Office 2)"; users repeat them.
             val wanted = words(name.replace(LABEL_SUFFIX_REGEX, ""))
             val normalized = speakers.map { speaker -> speaker to (listOf(speaker.name) + speaker.aliases).map(::words) }

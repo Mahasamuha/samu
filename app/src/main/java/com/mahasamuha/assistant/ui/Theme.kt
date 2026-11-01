@@ -57,41 +57,43 @@ data class AppColors(
     val status: Color,
 )
 
-private val PaperColors = AppColors(
-    dark = false,
-    surface = Brand.paper,
-    panel = Brand.paper,
-    panelEdge = null,
-    text = Brand.ink,
-    textBody = Color.Black.copy(alpha = 0.70f),
-    textMuted = Color.Black.copy(alpha = 0.55f),
-    divider = Color.Black.copy(alpha = 0.08f),
-    inset = Brand.fieldLight,
-    bubbleAssistant = Color.Black.copy(alpha = 0.04f),
-    bubbleUser = Brand.indigo,
-    onBubbleUser = Brand.paper,
-    actionBackground = Brand.ink,
-    actionContent = Brand.paper,
-    status = Brand.sage,
-)
+private val PaperColors =
+    AppColors(
+        dark = false,
+        surface = Brand.paper,
+        panel = Brand.paper,
+        panelEdge = null,
+        text = Brand.ink,
+        textBody = Color.Black.copy(alpha = 0.70f),
+        textMuted = Color.Black.copy(alpha = 0.55f),
+        divider = Color.Black.copy(alpha = 0.08f),
+        inset = Brand.fieldLight,
+        bubbleAssistant = Color.Black.copy(alpha = 0.04f),
+        bubbleUser = Brand.indigo,
+        onBubbleUser = Brand.paper,
+        actionBackground = Brand.ink,
+        actionContent = Brand.paper,
+        status = Brand.sage,
+    )
 
-private val InkColors = AppColors(
-    dark = true,
-    surface = Brand.ink,
-    panel = Color.White.copy(alpha = 0.04f).compositeOver(Brand.ink),
-    panelEdge = Color.White.copy(alpha = 0.08f),
-    text = Brand.paper,
-    textBody = Brand.paper,
-    textMuted = Color.White.copy(alpha = 0.55f),
-    divider = Color.White.copy(alpha = 0.10f),
-    inset = Color.White.copy(alpha = 0.06f),
-    bubbleAssistant = Color.White.copy(alpha = 0.06f),
-    bubbleUser = Brand.indigo,
-    onBubbleUser = Brand.paper,
-    actionBackground = Brand.paper,
-    actionContent = Brand.ink,
-    status = Brand.sage,
-)
+private val InkColors =
+    AppColors(
+        dark = true,
+        surface = Brand.ink,
+        panel = Color.White.copy(alpha = 0.04f).compositeOver(Brand.ink),
+        panelEdge = Color.White.copy(alpha = 0.08f),
+        text = Brand.paper,
+        textBody = Brand.paper,
+        textMuted = Color.White.copy(alpha = 0.55f),
+        divider = Color.White.copy(alpha = 0.10f),
+        inset = Color.White.copy(alpha = 0.06f),
+        bubbleAssistant = Color.White.copy(alpha = 0.06f),
+        bubbleUser = Brand.indigo,
+        onBubbleUser = Brand.paper,
+        actionBackground = Brand.paper,
+        actionContent = Brand.ink,
+        status = Brand.sage,
+    )
 
 private val LocalAppColors = staticCompositionLocalOf { PaperColors }
 
@@ -99,9 +101,10 @@ private fun geist(weight: Int) =
     Font(R.font.geist, FontWeight(weight), variationSettings = FontVariation.Settings(FontVariation.weight(weight)))
 
 val Geist = FontFamily(geist(400), geist(500))
-val GeistMono = FontFamily(
-    Font(R.font.geist_mono, FontWeight.Normal, variationSettings = FontVariation.Settings(FontVariation.weight(400))),
-)
+val GeistMono =
+    FontFamily(
+        Font(R.font.geist_mono, FontWeight.Normal, variationSettings = FontVariation.Settings(FontVariation.weight(400))),
+    )
 
 /** The design system's type scale, the sizes a phone screen uses. */
 object AppType {
@@ -115,7 +118,8 @@ object AppType {
 
 object AppTheme {
     val colors: AppColors
-        @Composable @ReadOnlyComposable get() = LocalAppColors.current
+        @Composable @ReadOnlyComposable
+        get() = LocalAppColors.current
 }
 
 /** Paper by default; the flat-ink variant when the system is in dark mode. */
@@ -123,29 +127,43 @@ object AppTheme {
 fun AssistantTheme(content: @Composable () -> Unit) {
     val colors = if (isSystemInDarkTheme()) InkColors else PaperColors
     // Material components (ripples, text selection, dialogs) pick up the same palette.
-    val scheme = if (colors.dark) {
-        darkColorScheme(
-            primary = colors.actionBackground, onPrimary = colors.actionContent,
-            background = colors.surface, onBackground = colors.text,
-            surface = colors.surface, onSurface = colors.text,
-            surfaceContainer = colors.surface, surfaceContainerLow = colors.surface, surfaceContainerHigh = colors.surface,
-            onSurfaceVariant = colors.textMuted, outlineVariant = colors.divider,
+    val scheme =
+        if (colors.dark) {
+            darkColorScheme(
+                primary = colors.actionBackground,
+                onPrimary = colors.actionContent,
+                background = colors.surface,
+                onBackground = colors.text,
+                surface = colors.surface,
+                onSurface = colors.text,
+                surfaceContainer = colors.surface,
+                surfaceContainerLow = colors.surface,
+                surfaceContainerHigh = colors.surface,
+                onSurfaceVariant = colors.textMuted,
+                outlineVariant = colors.divider,
+            )
+        } else {
+            lightColorScheme(
+                primary = colors.actionBackground,
+                onPrimary = colors.actionContent,
+                background = colors.surface,
+                onBackground = colors.text,
+                surface = colors.surface,
+                onSurface = colors.text,
+                surfaceContainer = colors.surface,
+                surfaceContainerLow = colors.surface,
+                surfaceContainerHigh = colors.surface,
+                onSurfaceVariant = colors.textMuted,
+                outlineVariant = colors.divider,
+            )
+        }
+    val typography =
+        Typography(
+            headlineSmall = AppType.h3,
+            bodyLarge = AppType.body,
+            bodyMedium = AppType.body.copy(fontSize = 14.sp, lineHeight = 20.sp),
+            labelLarge = AppType.ui,
         )
-    } else {
-        lightColorScheme(
-            primary = colors.actionBackground, onPrimary = colors.actionContent,
-            background = colors.surface, onBackground = colors.text,
-            surface = colors.surface, onSurface = colors.text,
-            surfaceContainer = colors.surface, surfaceContainerLow = colors.surface, surfaceContainerHigh = colors.surface,
-            onSurfaceVariant = colors.textMuted, outlineVariant = colors.divider,
-        )
-    }
-    val typography = Typography(
-        headlineSmall = AppType.h3,
-        bodyLarge = AppType.body,
-        bodyMedium = AppType.body.copy(fontSize = 14.sp, lineHeight = 20.sp),
-        labelLarge = AppType.ui,
-    )
     CompositionLocalProvider(LocalAppColors provides colors) {
         MaterialTheme(colorScheme = scheme, typography = typography, content = content)
     }

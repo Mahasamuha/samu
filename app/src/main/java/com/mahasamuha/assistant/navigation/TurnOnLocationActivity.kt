@@ -22,26 +22,29 @@ import com.mahasamuha.assistant.voice.TAG
  * destination and app, not an intent, so it never launches an intent handed to it.
  */
 class TurnOnLocationActivity : ComponentActivity() {
-
-    private val turnOn = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) navigate() else Log.i(TAG, "Location left off; not navigating")
-        finish()
-    }
+    private val turnOn =
+        registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+            if (result.resultCode == Activity.RESULT_OK) navigate() else Log.i(TAG, "Location left off; not navigating")
+            finish()
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (savedInstanceState != null) return // the dialog is already up
-        val request = LocationSettingsRequest.Builder()
-            .addLocationRequest(LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10_000).build())
-            .setAlwaysShow(true)
-            .setNeedBle(false)
-            .build()
-        LocationServices.getSettingsClient(this).checkLocationSettings(request)
+        val request =
+            LocationSettingsRequest
+                .Builder()
+                .addLocationRequest(LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10_000).build())
+                .setAlwaysShow(true)
+                .setNeedBle(false)
+                .build()
+        LocationServices
+            .getSettingsClient(this)
+            .checkLocationSettings(request)
             .addOnSuccessListener {
                 navigate()
                 finish()
-            }
-            .addOnFailureListener { e ->
+            }.addOnFailureListener { e ->
                 if (e is ResolvableApiException) {
                     turnOn.launch(IntentSenderRequest.Builder(e.resolution).build())
                 } else {
@@ -61,7 +64,11 @@ class TurnOnLocationActivity : ComponentActivity() {
         private const val EXTRA_DESTINATION = "destination"
         private const val EXTRA_APP = "app"
 
-        fun intent(context: Context, destination: String, app: MapsApp): Intent =
+        fun intent(
+            context: Context,
+            destination: String,
+            app: MapsApp,
+        ): Intent =
             Intent(context, TurnOnLocationActivity::class.java)
                 .putExtra(EXTRA_DESTINATION, destination)
                 .putExtra(EXTRA_APP, app.id)

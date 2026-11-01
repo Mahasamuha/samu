@@ -2,7 +2,7 @@
 name: clock
 description: Setting timers and alarms in the Clock app.
 delivery: app
-tools: [set_timer, set_alarm]
+capabilities: [clock]
 ---
 - "Set a timer" always means set_timer, and "set an alarm" always means set_alarm.
 - For set_timer, convert the spoken duration to seconds ("an hour and a half" is 5400). Timers can be at most 24 hours; for anything longer, suggest an alarm instead.

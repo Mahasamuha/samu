@@ -27,34 +27,52 @@ class PlayMusicTool(
     private val mcp: McpClient,
     private val closePanel: () -> Unit,
 ) : ActionTool {
-
     override val privateRemoteTools = setOf(FIND_TOOL)
 
-    override val definition = ToolDefinition(
-        name = "play_music",
-        description = "Start music from the user's library in Symfonium, on the phone or a named speaker. The phone reports it.",
-        inputSchema = JSONObject()
-            .put("type", "object")
-            .put("properties", JSONObject()
-                .put("kind", JSONObject()
-                    .put("type", "string")
-                    .put("enum", JSONArray(KINDS))
-                    .put("description", "What the user asked for. \"current\" is what's already playing (\"play it in the office\", " +
-                        "\"put this on the Sonos\"), with speaker. \"mix\" is only for music without any name (\"play some music\", " +
-                        "\"shuffle my library\")."))
-                .put("name", JSONObject()
-                    .put("type", "string")
-                    .put("description", "As the user said it. Required unless kind is mix or current."))
-                .put("artist", JSONObject()
-                    .put("type", "string")
-                    .put("description", "Only if the user said it."))
-                .put("speaker", JSONObject()
-                    .put("type", "string")
-                    .put("description", "A speaker or room the user named, e.g. \"office\"; \"phone\" for this phone. Omit to keep the current output.")))
-            .put("required", JSONArray().put("kind"))
-            .put("additionalProperties", false),
-        annotations = ToolAnnotations(title = "Play music", readOnlyHint = false, destructiveHint = false, openWorldHint = false),
-    )
+    override val definition =
+        ToolDefinition(
+            name = "play_music",
+            description = "Start music from the user's library in Symfonium, on the phone or a named speaker. The phone reports it.",
+            inputSchema =
+                JSONObject()
+                    .put("type", "object")
+                    .put(
+                        "properties",
+                        JSONObject()
+                            .put(
+                                "kind",
+                                JSONObject()
+                                    .put("type", "string")
+                                    .put("enum", JSONArray(KINDS))
+                                    .put(
+                                        "description",
+                                        "What the user asked for. \"current\" is what's already playing (\"play it in the office\", " +
+                                            "\"put this on the Sonos\"), with speaker. \"mix\" is only for music without any name " +
+                                            "(\"play some music\", \"shuffle my library\").",
+                                    ),
+                            ).put(
+                                "name",
+                                JSONObject()
+                                    .put("type", "string")
+                                    .put("description", "As the user said it. Required unless kind is mix or current."),
+                            ).put(
+                                "artist",
+                                JSONObject()
+                                    .put("type", "string")
+                                    .put("description", "Only if the user said it."),
+                            ).put(
+                                "speaker",
+                                JSONObject()
+                                    .put("type", "string")
+                                    .put(
+                                        "description",
+                                        "A speaker or room the user named, e.g. \"office\"; \"phone\" for this phone. Omit to keep the current output.",
+                                    ),
+                            ),
+                    ).put("required", JSONArray().put("kind"))
+                    .put("additionalProperties", false),
+            annotations = ToolAnnotations(title = "Play music", readOnlyHint = false, destructiveHint = false, openWorldHint = false),
+        )
 
     override suspend fun prepare(arguments: JSONObject): PendingAction {
         require(symfonium.installed) { "Symfonium isn't installed" }
@@ -87,12 +105,13 @@ class PlayMusicTool(
             type = item?.kind ?: kind
             name = item?.name ?: asked
             artist = item?.artist ?: askedArtist
-            sentence = "Playing " + when (type) {
-                "artist" -> name
-                "playlist" -> "the $name playlist"
-                "genre" -> "${name.lowercase()}, shuffled"
-                else -> if (artist != null) "$name by $artist" else name
-            }
+            sentence = "Playing " +
+                when (type) {
+                    "artist" -> name
+                    "playlist" -> "the $name playlist"
+                    "genre" -> "${name.lowercase()}, shuffled"
+                    else -> if (artist != null) "$name by $artist" else name
+                }
         }
         val text = sentence + (renderer?.let { " " + it.spoken } ?: "") + "."
 
@@ -108,39 +127,54 @@ class PlayMusicTool(
         }
     }
 
-    private class Item(val kind: String, val name: String, val artist: String?)
+    private class Item(
+        val kind: String,
+        val name: String,
+        val artist: String?,
+    )
 
     /** Looks the name up on the server. Null means unavailable, so the caller falls back to the model's text. */
-    private suspend fun find(kind: String, name: String, artist: String?): Item? {
-        val result = try {
-            val query = JSONObject().put("kind", kind).put("name", name).apply { artist?.let { put("artist", it) } }
-            withTimeoutOrNull(FIND_TIMEOUT_MS) { mcp.callTool(FIND_TOOL, query) }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            // The server's messages name the failure ("Plex returned 401"), never the music asked for.
-            Log.w(TAG, "music_find failed: ${e.message}")
-            null
-        }
-        val json = try {
-            result?.let { JSONObject(it) }
-        } catch (e: JSONException) {
-            null
-        }
+    private suspend fun find(
+        kind: String,
+        name: String,
+        artist: String?,
+    ): Item? {
+        val result =
+            try {
+                val query = JSONObject().put("kind", kind).put("name", name).apply { artist?.let { put("artist", it) } }
+                withTimeoutOrNull(FIND_TIMEOUT_MS) { mcp.callTool(FIND_TOOL, query) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // The server's messages name the failure ("Plex returned 401"), never the music asked for.
+                Log.w(TAG, "music_find failed: ${e.message}")
+                null
+            }
+        val json =
+            try {
+                result?.let { JSONObject(it) }
+            } catch (e: JSONException) {
+                null
+            }
         if (json == null) {
             Log.w(TAG, "music_find unavailable; using the names as given")
             return null
         }
         when (json.optString("status")) {
-            "found" -> json.optJSONObject("item")?.let { item ->
-                val found = item.optString("name")
-                if (found.isNotEmpty()) {
-                    return Item(item.optString("kind").ifEmpty { kind }, found, item.optString("artist").ifEmpty { null })
+            "found" -> {
+                json.optJSONObject("item")?.let { item ->
+                    val found = item.optString("name")
+                    if (found.isNotEmpty()) {
+                        return Item(item.optString("kind").ifEmpty { kind }, found, item.optString("artist").ifEmpty { null })
+                    }
                 }
             }
-            "not_found" -> throw IllegalArgumentException(
-                "Nothing called $name in the library. Closest: " + suggestions(json.optJSONArray("suggestions")),
-            )
+
+            "not_found" -> {
+                throw IllegalArgumentException(
+                    "Nothing called $name in the library. Closest: " + suggestions(json.optJSONArray("suggestions")),
+                )
+            }
         }
         Log.w(TAG, "music_find returned an unexpected result; using the names as given")
         return null
@@ -163,7 +197,11 @@ class PlayMusicTool(
 }
 
 /** An output chosen for playback; [name] is null for this phone. */
-internal class Renderer(val type: Int, val identifier: String?, val name: String?) {
+internal class Renderer(
+    val type: Int,
+    val identifier: String?,
+    val name: String?,
+) {
     /** "on the phone" or "in the office". */
     val spoken get() = if (name == null) "on the phone" else "in the $name"
 
@@ -172,7 +210,10 @@ internal class Renderer(val type: Int, val identifier: String?, val name: String
 }
 
 /** Null when [speaker] is blank (keep the current output). Speaker errors are written for the model. */
-internal suspend fun resolveRenderer(speaker: String, speakers: SpeakerDirectory): Renderer? {
+internal suspend fun resolveRenderer(
+    speaker: String,
+    speakers: SpeakerDirectory,
+): Renderer? {
     val asked = speaker.trim()
     if (asked.isEmpty()) return null
     if (asked.lowercase() in PHONE_NAMES) return Renderer(0, null, null)

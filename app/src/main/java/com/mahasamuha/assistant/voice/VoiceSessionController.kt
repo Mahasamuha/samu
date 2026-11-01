@@ -1,10 +1,13 @@
 package com.mahasamuha.assistant.voice
 
 import android.app.KeyguardManager
+import android.os.SystemClock
 import android.security.keystore.UserNotAuthenticatedException
 import android.util.Log
 import com.mahasamuha.assistant.auth.AuthManager
 import com.mahasamuha.assistant.auth.NotSignedInException
+import com.mahasamuha.assistant.capabilities.SessionCatalog
+import com.mahasamuha.assistant.capabilities.UseCapabilityTool
 import com.mahasamuha.assistant.llm.ChatClient
 import com.mahasamuha.assistant.llm.ChatEvent
 import com.mahasamuha.assistant.llm.ChatException
@@ -12,14 +15,13 @@ import com.mahasamuha.assistant.llm.ChatMessage
 import com.mahasamuha.assistant.llm.ChatMessage.Role
 import com.mahasamuha.assistant.llm.ChatOptions
 import com.mahasamuha.assistant.llm.ToolCall
-import com.mahasamuha.assistant.skills.Skill
 import com.mahasamuha.assistant.tools.Confirmation
 import com.mahasamuha.assistant.tools.ConfirmationResult
 import com.mahasamuha.assistant.tools.ToolRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -57,15 +59,19 @@ data class PanelMessage(
 )
 
 /** A web page behind a reply, shown with it (search providers expect sources alongside answers). */
-data class SourceLink(val title: String, val url: String) {
+data class SourceLink(
+    val title: String,
+    val url: String,
+) {
     companion object {
         /** The pages in a `web_search` result (`{"results": [{title, url, …}]}`); empty for any other result. */
         fun fromSearchResult(result: String): List<SourceLink> {
-            val results = try {
-                JSONObject(result).optJSONArray("results")
-            } catch (e: JSONException) {
-                null
-            } ?: return emptyList()
+            val results =
+                try {
+                    JSONObject(result).optJSONArray("results")
+                } catch (e: JSONException) {
+                    null
+                } ?: return emptyList()
             return (0 until results.length()).mapNotNull { i ->
                 val page = results.optJSONObject(i) ?: return@mapNotNull null
                 val url = page.optString("url").takeIf { it.startsWith("https://") || it.startsWith("http://") } ?: return@mapNotNull null
@@ -76,7 +82,9 @@ data class SourceLink(val title: String, val url: String) {
 }
 
 /** A problem the user can act on; the message is spoken as is. */
-private class UserFacingException(message: String) : Exception(message)
+private class UserFacingException(
+    message: String,
+) : Exception(message)
 
 /**
  * One panel's conversation: listen, ask the LLM (running any tools it calls), speak the reply sentence
@@ -86,8 +94,7 @@ class VoiceSessionController(
     private val scope: CoroutineScope,
     private val stt: SpeechToText,
     private val chat: ChatClient,
-    private val toolsLoading: Deferred<ToolRegistry>,
-    private val skills: List<Skill>,
+    private val catalogLoading: suspend () -> SessionCatalog,
     private val speaker: Speaker,
     private val locationSource: LocationSource,
     private val auth: AuthManager,
@@ -99,9 +106,8 @@ class VoiceSessionController(
 
     private val history = mutableListOf<ChatMessage>()
 
-    // Known from the first turn on: remote tools load while the user speaks.
+    // Known from the first turn on.
     private lateinit var tools: ToolRegistry
-    private var activeSkills = emptyList<Skill>()
     private var turn: Job? = null
 
     // Completed by a Confirm/Cancel tap while an action is being confirmed or announced.
@@ -142,16 +148,17 @@ class VoiceSessionController(
             checkPreconditions()
             // Look up the location while the user is talking, so it adds no delay.
             val location = scope.async { runCatching { locationSource.current() }.getOrNull() }
-            val heard = try {
-                hear()
-            } catch (e: Exception) {
-                location.cancel()
-                if (followUp && e is SttException && e.noSpeech) {
-                    _state.update { it.copy(phase = PanelState.Phase.Idle, hearing = "") }
-                    return
+            val heard =
+                try {
+                    hear()
+                } catch (e: Exception) {
+                    location.cancel()
+                    if (followUp && e is SttException && e.noSpeech) {
+                        _state.update { it.copy(phase = PanelState.Phase.Idle, hearing = "") }
+                        return
+                    }
+                    throw e
                 }
-                throw e
-            }
             if (heard.isBlank()) throw UserFacingException("I didn't catch that.")
             addMessage(fromUser = true, heard)
             // Listening is over; waiting on location and the tool list counts as thinking.
@@ -159,22 +166,23 @@ class VoiceSessionController(
 
             val place = location.await()
             if (history.isEmpty()) {
-                tools = toolsLoading.await()
-                // A skill is only used when every tool it relies on is registered (plan §4b).
-                activeSkills = skills.filter { skill -> skill.tools.all { it in tools.names } }
-                Log.i(TAG, "Tools: ${tools.names.sorted().joinToString()}; skills: ${activeSkills.joinToString { it.name }.ifEmpty { "none" }} (of ${skills.size})")
-                history += ChatMessage(Role.SYSTEM, VoicePrompt.system(activeSkills, place))
+                // Resolved now, at the first model request, so a fresh index that landed while the user spoke counts.
+                val catalog = catalogLoading()
+                tools = catalog.registry
+                Log.i(TAG, "Tools: ${tools.names.sorted().joinToString()}")
+                history += ChatMessage(Role.SYSTEM, VoicePrompt.system(catalog.eagerSkills, catalog.lazyCapabilities, place))
             }
             val turnStart = history.size
             history += ChatMessage(Role.USER, heard)
 
-            val reply = try {
-                respond()
-            } catch (e: Exception) {
-                // Keep history to completed exchanges.
-                while (history.size > turnStart) history.removeAt(history.lastIndex)
-                throw e
-            }
+            val reply =
+                try {
+                    respond()
+                } catch (e: Exception) {
+                    // Keep history to completed exchanges.
+                    while (history.size > turnStart) history.removeAt(history.lastIndex)
+                    throw e
+                }
             speaker.awaitIdle()
             _state.update { it.copy(phase = PanelState.Phase.Idle) }
             answered = true
@@ -205,7 +213,10 @@ class VoiceSessionController(
         var final = ""
         stt.listen(expected).collect { event ->
             when (event) {
-                is SttEvent.Partial -> _state.update { it.copy(hearing = event.text) }
+                is SttEvent.Partial -> {
+                    _state.update { it.copy(hearing = event.text) }
+                }
+
                 is SttEvent.Final -> {
                     final = event.text
                     _state.update { it.copy(hearing = event.text) }
@@ -221,10 +232,11 @@ class VoiceSessionController(
      * history; returns all spoken text.
      */
     private suspend fun respond(): String {
-        val options = ChatOptions(tools = tools.definitions)
         val spoken = StringBuilder()
         // Pages from this turn's searches, shown with the next reply bubble (the answer after the search).
         var sources = emptyList<SourceLink>()
+        // When a round called use_capability: the clock time then, to log how long the extra round took to start.
+        var bindRequestedAt: Long? = null
         repeat(MAX_ROUNDS) {
             val splitter = SentenceSplitter()
             val text = StringBuilder()
@@ -233,7 +245,16 @@ class VoiceSessionController(
             var bubble: Int? = null // this round's reply bubble in the transcript
             // v1 calls the LLM only while unlocked (plan §2); the phone may have locked during the last round.
             if (keyguard.isDeviceLocked) throw UserFacingException("Unlock your phone first.")
+            // Per round, since use_capability adds tools: those bound in this round are sent in the next.
+            val options = ChatOptions(tools = tools.definitions)
             chat.stream(history.toList(), options).collect { event ->
+                bindRequestedAt?.let { requested ->
+                    Log.i(
+                        TAG,
+                        "Round after use_capability began streaming ${SystemClock.elapsedRealtime() - requested} ms after the bind request",
+                    )
+                    bindRequestedAt = null
+                }
                 when (event) {
                     is ChatEvent.Text -> {
                         val started = text.isNotBlank()
@@ -250,8 +271,14 @@ class VoiceSessionController(
                         }
                         for (sentence in splitter.add(event.delta)) speakSentence(sentence)
                     }
-                    is ChatEvent.ToolCalls -> calls = event.calls
-                    is ChatEvent.Finished -> replay = event.replay
+
+                    is ChatEvent.ToolCalls -> {
+                        calls = event.calls
+                    }
+
+                    is ChatEvent.Finished -> {
+                        replay = event.replay
+                    }
                 }
             }
             splitter.flush()?.let { speakSentence(it) }
@@ -267,6 +294,7 @@ class VoiceSessionController(
             }
             if (calls.isEmpty()) return spoken.toString().trim()
 
+            if (calls.any { it.name == UseCapabilityTool.NAME }) bindRequestedAt = SystemClock.elapsedRealtime()
             for (call in calls) {
                 _state.update { it.copy(phase = PanelState.Phase.Thinking) }
                 val result = tools.execute(call, ::confirm)
@@ -294,32 +322,35 @@ class VoiceSessionController(
         tap = tapped
         _state.update { it.copy(confirming = confirmation) }
         // The result, plus what to show as the user's side of the exchange (their words, or the button they tapped).
-        val (result, userReply) = try {
-            coroutineScope {
-                val spoken = async {
-                    speakSentence(confirmation.text)
-                    speaker.awaitIdle()
-                    when (confirmation) {
-                        is Confirmation.Ask -> hearConfirmation()
-                        is Confirmation.Announce, is Confirmation.Report -> ConfirmationResult.Confirmed to null
+        val (result, userReply) =
+            try {
+                coroutineScope {
+                    val spoken =
+                        async {
+                            speakSentence(confirmation.text)
+                            speaker.awaitIdle()
+                            when (confirmation) {
+                                is Confirmation.Ask -> hearConfirmation()
+                                is Confirmation.Announce, is Confirmation.Report -> ConfirmationResult.Confirmed to null
+                            }
+                        }
+                    select<Pair<ConfirmationResult, String?>> {
+                        spoken.onAwait { it }
+                        tapped.onAwait { confirmed ->
+                            spoken.cancel()
+                            speaker.stop()
+                            if (confirmed) ConfirmationResult.Confirmed to "confirm" else ConfirmationResult.Declined(null) to "cancel"
+                        }
                     }
                 }
-                select<Pair<ConfirmationResult, String?>> {
-                    spoken.onAwait { it }
-                    tapped.onAwait { confirmed ->
-                        spoken.cancel()
-                        speaker.stop()
-                        if (confirmed) ConfirmationResult.Confirmed to "confirm" else ConfirmationResult.Declined(null) to "cancel"
-                    }
-                }
+            } finally {
+                tap = null
+                _state.update { it.copy(confirming = null, hearing = "") }
             }
-        } finally {
-            tap = null
-            _state.update { it.copy(confirming = null, hearing = "") }
-        }
         addMessage(fromUser = false, confirmation.text)
         when {
             userReply != null -> addMessage(fromUser = true, userReply)
+
             // Nothing recognized: say so, or a "no" that wasn't heard looks like it was ignored.
             confirmation is Confirmation.Ask -> addNote("no reply heard · cancelled")
         }
@@ -332,19 +363,27 @@ class VoiceSessionController(
     }
 
     private suspend fun hearConfirmation(): Pair<ConfirmationResult, String?> {
-        val reply = try {
-            hear(ConfirmationReply.EXPECTED)
-        } catch (e: SttException) {
-            if (!e.noSpeech) throw e
-            ""
-        }.ifBlank { null }
-        val result = if (reply != null && ConfirmationReply.isYes(reply)) ConfirmationResult.Confirmed
-        else ConfirmationResult.Declined(reply)
+        val reply =
+            try {
+                hear(ConfirmationReply.EXPECTED)
+            } catch (e: SttException) {
+                if (!e.noSpeech) throw e
+                ""
+            }.ifBlank { null }
+        val result =
+            if (reply != null && ConfirmationReply.isYes(reply)) {
+                ConfirmationResult.Confirmed
+            } else {
+                ConfirmationResult.Declined(reply)
+            }
         return result to reply
     }
 
     /** Adds a bubble and clears the in-progress words. */
-    private fun addMessage(fromUser: Boolean, text: String) {
+    private fun addMessage(
+        fromUser: Boolean,
+        text: String,
+    ) {
         _state.update { it.copy(transcript = it.transcript + PanelMessage(fromUser, text), hearing = "") }
     }
 
@@ -367,22 +406,60 @@ class VoiceSessionController(
         const val MAX_ROUNDS = 5
     }
 
-    private fun userMessage(e: Exception): String = when (e) {
-        is UserFacingException -> e.message.orEmpty()
-        is NotSignedInException -> "You're signed out. Open the assistant app to sign in."
-        // The screen can be unlocked while the Keystore still counts the phone as locked (e.g. woken
-        // within the lock grace period, no fingerprint or PIN), which keeps the token key closed.
-        is UserNotAuthenticatedException ->
-            if (keyguard.isDeviceLocked) "Unlock your phone first."
-            else "Lock your phone and unlock it with your fingerprint or PIN, then try again."
-        is ChatException.BudgetExceeded -> "The assistant's monthly budget is used up."
-        is ChatException.RateLimited -> "That's too many requests. Try again in a moment."
-        is ChatException.Unauthorized -> "The server didn't accept the sign-in. Open the assistant app and sign in again."
-        is ChatException.Unavailable -> "I can't reach the assistant server right now."
-        is ChatException.Rejected -> "The assistant server rejected that request."
-        is SttException -> if (e.noSpeech) "I didn't catch that." else "Speech recognition failed."
-        is OnDeviceSttUnavailableException -> "On-device speech recognition isn't available. Check that the speech model is downloaded."
-        is SpeakerException -> "Text to speech isn't working."
-        else -> "Something went wrong."
-    }
+    private fun userMessage(e: Exception): String =
+        when (e) {
+            is UserFacingException -> {
+                e.message.orEmpty()
+            }
+
+            is NotSignedInException -> {
+                "You're signed out. Open the assistant app to sign in."
+            }
+
+            // The screen can be unlocked while the Keystore still counts the phone as locked (e.g. woken
+            // within the lock grace period, no fingerprint or PIN), which keeps the token key closed.
+            is UserNotAuthenticatedException -> {
+                if (keyguard.isDeviceLocked) {
+                    "Unlock your phone first."
+                } else {
+                    "Lock your phone and unlock it with your fingerprint or PIN, then try again."
+                }
+            }
+
+            is ChatException.BudgetExceeded -> {
+                "The assistant's monthly budget is used up."
+            }
+
+            is ChatException.RateLimited -> {
+                "That's too many requests. Try again in a moment."
+            }
+
+            is ChatException.Unauthorized -> {
+                "The server didn't accept the sign-in. Open the assistant app and sign in again."
+            }
+
+            is ChatException.Unavailable -> {
+                "I can't reach the assistant server right now."
+            }
+
+            is ChatException.Rejected -> {
+                "The assistant server rejected that request."
+            }
+
+            is SttException -> {
+                if (e.noSpeech) "I didn't catch that." else "Speech recognition failed."
+            }
+
+            is OnDeviceSttUnavailableException -> {
+                "On-device speech recognition isn't available. Check that the speech model is downloaded."
+            }
+
+            is SpeakerException -> {
+                "Text to speech isn't working."
+            }
+
+            else -> {
+                "Something went wrong."
+            }
+        }
 }
