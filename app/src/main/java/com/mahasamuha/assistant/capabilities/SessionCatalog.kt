@@ -41,10 +41,11 @@ class SessionCatalog(
     val eagerSkills: List<Skill>
 
     init {
+        // First, so a server tool can never shadow it (build() also drops remote tools with its name).
+        if (lazyCapabilities.isNotEmpty()) registry.bind(listOf(UseCapabilityTool(this)))
         val eager = available.filter { it.capability.load == Load.EAGER }
         eager.forEach { bindTools(it) }
         eagerSkills = skills.filter { skill -> skill.capabilities.isEmpty() || skill.capabilities.any { it in bound } }.sortedBy { it.name }
-        if (lazyCapabilities.isNotEmpty()) registry.bind(listOf(UseCapabilityTool(this)))
         Log.i(
             TAG,
             "Capabilities: index=$source; listed ${available.joinToString { it.capability.id }.ifEmpty { "none" }}; " +
@@ -89,7 +90,7 @@ class SessionCatalog(
             val local = candidates.filter { (_, allowed) -> allowed }.map { (tool, _) -> tool }
             val localByName = local.associateBy { it.definition.name }
             // A local tool's name stays reserved even in a session that leaves the tool out.
-            val reserved = candidates.map { (tool, _) -> tool }.filterNot { it.allowRemote }.map { it.definition.name }.toSet()
+            val reserved = candidates.map { (tool, _) -> tool }.filterNot { it.allowRemote }.map { it.definition.name }.toSet() + UseCapabilityTool.NAME
             // Remote tools that a local tool calls itself never reach the model.
             val privateNames = candidates.flatMap { (tool, _) -> tool.privateRemoteTools }.toSet()
 
@@ -98,7 +99,7 @@ class SessionCatalog(
                 .filter { it.name !in privateNames }
                 .filter { definition ->
                     (definition.name !in reserved).also { kept ->
-                        if (!kept) Log.w(TAG, "Ignoring remote ${definition.name}: the local one doesn't allow a remote override")
+                        if (!kept) Log.w(TAG, "Ignoring remote ${definition.name}: the name is reserved or the local one doesn't allow a remote override")
                     }
                 }
                 .associate { definition ->

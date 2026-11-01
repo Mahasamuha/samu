@@ -1,7 +1,5 @@
 package com.mahasamuha.assistant.capabilities
 
-import android.util.Log
-import com.mahasamuha.assistant.voice.TAG
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -33,25 +31,21 @@ data class Capability(
     companion object {
         /**
          * Parses the `capabilities` array shared by the bundled manifest and the fetched index. An entry
-         * with an unknown `load` or `where` (e.g. from a newer server) is skipped with a log, so one bad
-         * entry doesn't hide the rest.
+         * that is malformed, over a limit, or has an unknown `load` or `where` (e.g. from a newer server)
+         * is skipped with a log, so one bad entry doesn't hide the rest.
          */
-        fun parseAll(array: JSONArray): List<Capability> = (0 until array.length()).mapNotNull { i ->
-            val entry = array.getJSONObject(i)
-            try {
-                parse(entry)
-            } catch (e: IllegalArgumentException) {
-                Log.w(TAG, "Skipping capability ${entry.optString("id")}: ${e.message}")
-                null
-            }
-        }
+        fun parseAll(array: JSONArray): List<Capability> =
+            parseEntries(array, "capability", IndexLimits.MAX_CAPABILITIES, ::parse)
 
         private fun parse(entry: JSONObject): Capability {
             val tools = entry.getJSONArray("tools")
+            require(tools.length() <= IndexLimits.MAX_TOOLS_PER_CAPABILITY) { "${tools.length()} tools (limit ${IndexLimits.MAX_TOOLS_PER_CAPABILITY})" }
+            val description = entry.optString("description")
+            IndexLimits.checkLength("description", description, IndexLimits.MAX_CAPABILITY_DESCRIPTION)
             return Capability(
                 id = entry.getString("id"),
                 title = entry.optString("title"),
-                description = entry.optString("description"),
+                description = description,
                 load = enumValue<Load>(entry.getString("load")),
                 tools = (0 until tools.length()).map { j ->
                     val tool = tools.getJSONObject(j)

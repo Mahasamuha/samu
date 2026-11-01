@@ -140,18 +140,29 @@ class CapabilityCache(
             fetchedAtMillis = fetchedAt,
             source = source,
             capabilities = Capability.parseAll(json.getJSONArray("capabilities")),
-            tools = (0 until (tools?.length() ?: 0)).map { toolDefinition(tools!!.getJSONObject(it)) },
-            skills = (0 until (skills?.length() ?: 0)).map { i ->
-                val skill = skills!!.getJSONObject(i)
-                val attached = skill.optJSONArray("capabilities")
-                Skill(
-                    name = skill.getString("name"),
-                    description = skill.optString("description"),
-                    capabilities = (0 until (attached?.length() ?: 0)).map { attached!!.getString(it) },
-                    instructions = skill.optString("instructions"),
-                )
-            },
+            tools = tools?.let { parseEntries(it, "tool", IndexLimits.MAX_TOOL_DEFINITIONS, ::parseTool) }.orEmpty(),
+            skills = skills?.let { parseEntries(it, "skill", IndexLimits.MAX_SKILLS, ::parseSkill) }.orEmpty(),
         )
+    }
+
+    private fun parseTool(entry: JSONObject): ToolDefinition {
+        val tool = toolDefinition(entry)
+        IndexLimits.checkLength("description", tool.description, IndexLimits.MAX_TOOL_DESCRIPTION)
+        IndexLimits.checkLength("inputSchema", tool.inputSchema.toString(), IndexLimits.MAX_INPUT_SCHEMA)
+        return tool
+    }
+
+    private fun parseSkill(entry: JSONObject): Skill {
+        val attached = entry.optJSONArray("capabilities")
+        val skill = Skill(
+            name = entry.getString("name"),
+            description = entry.optString("description"),
+            capabilities = (0 until (attached?.length() ?: 0)).map { attached!!.getString(it) },
+            instructions = entry.optString("instructions"),
+        )
+        IndexLimits.checkLength("description", skill.description, IndexLimits.MAX_SKILL_DESCRIPTION)
+        IndexLimits.checkLength("instructions", skill.instructions, IndexLimits.MAX_SKILL_INSTRUCTIONS)
+        return skill
     }
 
     private companion object {
