@@ -4,6 +4,7 @@ import android.app.KeyguardManager
 import android.os.SystemClock
 import android.security.keystore.UserNotAuthenticatedException
 import android.util.Log
+import com.mahasamuha.assistant.GatewayNotSetException
 import com.mahasamuha.assistant.auth.AuthManager
 import com.mahasamuha.assistant.auth.NotSignedInException
 import com.mahasamuha.assistant.capabilities.SessionCatalog
@@ -410,6 +411,10 @@ class VoiceSessionController(
         when (e) {
             is UserFacingException -> {
                 e.message.orEmpty()
+            }
+
+            is GatewayNotSetException -> {
+                "No server is set up. Open the assistant app and enter the gateway address."
             }
 
             is NotSignedInException -> {

@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.telecom.TelecomManager
 import android.telephony.TelephonyManager
+import androidx.core.net.toUri
 import com.mahasamuha.assistant.auth.AuthManager
 import com.mahasamuha.assistant.auth.TokenStore
 import com.mahasamuha.assistant.calls.PlaceCallTool
@@ -52,8 +53,12 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Holds the app-wide singletons; constructed by hand (no DI framework at this size). */
 class AssistantApp : Application() {
     val config by lazy { AppConfig.fromBuildConfig() }
+    val gatewayPreference by lazy { GatewayPreference(this) }
+
+    /** The gateways in effect (plan §5b): the URL saved on the setup screen. Throws [GatewayNotSetException] before one is. */
+    val gateways: () -> List<Uri> = { gatewayUrls(gatewayPreference.url).map { it.toUri() } }
     val auth: AuthManager by lazy { AuthManager(this, config, TokenStore(this), onSignedOut = { capabilityCache.clear() }) }
-    val chatClient: ChatClient by lazy { GatewayChatClient(config.gatewayUrls, auth) }
+    val chatClient: ChatClient by lazy { GatewayChatClient(gateways, auth) }
     val locationSource: LocationSource by lazy { PlatformLocationSource(this) }
     val savedPlaces by lazy { SavedPlaces(this) }
     val voicePreference by lazy { VoicePreference(this) }
@@ -61,7 +66,7 @@ class AssistantApp : Application() {
     private val weatherTool by lazy { WeatherTool(OpenMeteoWeather()::forecast, locationSource) }
     private val contacts by lazy { ContactDirectory(contentResolver, resources) }
     private val smsSender by lazy { SmsSender(this) }
-    private val mcpClient by lazy { McpClient(config.gatewayUrls, auth) }
+    private val mcpClient by lazy { McpClient(gateways, auth) }
     val bundledCapabilities by lazy { BundledCapabilities(assets) }
     val capabilityCache: CapabilityCache by lazy { CapabilityCache(noBackupFilesDir, auth, mcpClient) }
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)

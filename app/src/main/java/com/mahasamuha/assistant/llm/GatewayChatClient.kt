@@ -25,7 +25,8 @@ import java.net.URL
  * provider-specific.
  */
 class GatewayChatClient(
-    private val gateways: List<Uri>,
+    /** Read at each request, so a URL changed on the setup screen applies at once. */
+    private val gateways: () -> List<Uri>,
     private val auth: AuthManager,
 ) : ChatClient {
     override fun stream(
@@ -35,7 +36,7 @@ class GatewayChatClient(
         callbackFlow {
             val token = auth.freshAccessToken()
             // v1 uses the first gateway; the list leaves room for a fallback.
-            val connection = URL("${gateways.first()}/v1/responses").openConnection() as HttpURLConnection
+            val connection = URL("${gateways().first()}/v1/responses").openConnection() as HttpURLConnection
 
             // An unreachable server often still accepts the connection (the reverse proxy answers) and then
             // sends nothing, so the read timeout alone would leave the user waiting a minute. The gateway

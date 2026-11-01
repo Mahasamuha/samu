@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -32,6 +33,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.mahasamuha.assistant.auth.NotSignedInException
@@ -69,6 +71,9 @@ class MainActivity : ComponentActivity() {
     // Plays the samples; the activity is visible, so its own speech is allowed.
     private lateinit var speaker: PlatformSpeaker
     private var work by mutableStateOf("")
+    private var gatewayInput by mutableStateOf("")
+    private var gatewayError by mutableStateOf<String?>(null)
+    private var gatewayInUse by mutableStateOf<String?>(null)
     private var capabilityStatus by mutableStateOf("")
     private var refreshingCapabilities by mutableStateOf(false)
 
@@ -116,6 +121,8 @@ class MainActivity : ComponentActivity() {
         home = app.savedPlaces.home
         work = app.savedPlaces.work
         voice = app.voicePreference.name
+        gatewayInput = app.gatewayPreference.url.orEmpty()
+        showGatewayInUse()
         speaker = PlatformSpeaker(this)
         runReporting("Voices") {
             voices = speaker.voices()
@@ -149,6 +156,14 @@ class MainActivity : ComponentActivity() {
                         work = it
                         app.savedPlaces.work = it
                     },
+                    gatewayInput = gatewayInput,
+                    gatewayError = gatewayError,
+                    gatewayInUse = gatewayInUse,
+                    onGatewayInputChange = {
+                        gatewayInput = it
+                        gatewayError = null
+                    },
+                    onSaveGateway = ::saveGateway,
                     voices = voices,
                     voice = voice,
                     onPickVoice = ::pickVoice,
@@ -194,6 +209,40 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         speaker.shutdown()
         super.onDestroy()
+    }
+
+    private fun showGatewayInUse() {
+        gatewayInUse = app.gatewayPreference.url
+    }
+
+    /**
+     * Saves the typed gateway URL, which is required. A different backend signs the user out, since the
+     * session belongs to the old one; the same URL changes nothing.
+     */
+    private fun saveGateway() {
+        val newUrl =
+            try {
+                parseGatewayUrl(gatewayInput)
+            } catch (e: IllegalArgumentException) {
+                gatewayError = e.message
+                return
+            }
+        gatewayInput = newUrl
+        val saved = app.gatewayPreference.url
+        if (!changesBackend(saved, newUrl)) {
+            message = "Gateway unchanged."
+            return
+        }
+        runReporting("Gateway") {
+            app.gatewayPreference.url = newUrl
+            Log.i(TAG, "Gateway ${if (saved == null) "set" else "switched"}: $newUrl")
+            // A phone upgraded from a build-time gateway can be signed in with no URL saved yet.
+            val wasSignedIn = app.auth.signedIn.value
+            app.auth.signOut()
+            showGatewayInUse()
+            capabilityStatus = describeCapabilityCache()
+            if (wasSignedIn) "Gateway set. You're signed out; sign in again." else "Gateway saved."
+        }
     }
 
     /** Saves [name] (null: the engine default) for the next session and plays a sample in it. */
@@ -269,7 +318,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /** The next thing to set up gets the one primary button; everything else is a ghost button. */
-private enum class Step { Role, SignIn, Mic, Location, Contacts, Sms, Calls, LocalNetwork, None }
+private enum class Step { Gateway, Role, SignIn, Mic, Location, Contacts, Sms, Calls, LocalNetwork, None }
 
 @Composable
 private fun SetupScreen(
@@ -285,6 +334,11 @@ private fun SetupScreen(
     message: String?,
     home: String,
     work: String,
+    gatewayInput: String,
+    gatewayError: String?,
+    gatewayInUse: String?,
+    onGatewayInputChange: (String) -> Unit,
+    onSaveGateway: () -> Unit,
     onHomeChange: (String) -> Unit,
     onWorkChange: (String) -> Unit,
     voices: List<VoiceOption>,
@@ -306,6 +360,7 @@ private fun SetupScreen(
     val colors = AppTheme.colors
     val next =
         when {
+            gatewayInUse == null -> Step.Gateway
             !roleHeld -> Step.Role
             !signedIn -> Step.SignIn
             !micAllowed -> Step.Mic
@@ -357,6 +412,31 @@ private fun SetupScreen(
             }
 
             Hairline()
+            MonoLabel("gateway")
+            Text(
+                if (gatewayInUse == null) {
+                    "Required first: enter the https:// address of the Samu gateway. Samu can't sign in or answer without it."
+                } else {
+                    "In use: $gatewayInUse. Changing it signs you out. The token is sent to whatever address you enter."
+                },
+                style = AppType.body,
+                color = colors.textBody,
+            )
+            OutlinedTextField(
+                value = gatewayInput,
+                onValueChange = onGatewayInputChange,
+                label = { Text("gateway URL") },
+                placeholder = { Text("https://<gateway-host>") },
+                isError = gatewayError != null,
+                supportingText = gatewayError?.let { { Text(it) } },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                textStyle = AppType.body,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Action(Step.Gateway, "save gateway", onSaveGateway)
+
+            Hairline()
             MonoLabel("digital assistant")
             Status(roleHeld, if (roleHeld) "This app is the default digital assistant." else "Not the default digital assistant yet.")
             Text(
@@ -371,7 +451,11 @@ private fun SetupScreen(
             Hairline()
             MonoLabel("account")
             Status(signedIn, if (signedIn) "Signed in." else "Not signed in.")
-            if (signedIn) GhostButton("sign out", onSignOut) else Action(Step.SignIn, "sign in →", onSignIn)
+            when {
+                signedIn -> GhostButton("sign out", onSignOut)
+                gatewayInUse == null -> Text("Set the gateway first.", style = AppType.caption, color = colors.textMuted)
+                else -> Action(Step.SignIn, "sign in →", onSignIn)
+            }
 
             Hairline()
             MonoLabel("capabilities")
