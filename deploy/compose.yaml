@@ -27,6 +27,13 @@ services:
     depends_on:
       - bifrost
       - mcp
+    # A stopped Bifrost or MCP container stops resolving; Docker's DNS then forwards the name upstream, and the
+    # default 5 s resolver timeout made every request to it hang that long before a 502. One 1 s try instead.
+    # Replacing the options drops Docker's defaults, so edns0 is set again.
+    dns_opt:
+      - "timeout:1"
+      - "attempts:1"
+      - "edns0"
     networks:
       - llm
       - tools
