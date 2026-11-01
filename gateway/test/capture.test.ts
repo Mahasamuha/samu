@@ -16,20 +16,31 @@ test("assembles streamed text and the final usage; raw is opt-in", () => {
   capture.add(bytes(stream.slice(0, 50)));
   capture.add(bytes(stream.slice(50)));
 
-  assert.deepEqual(capture.summarize(false), { truncated: false, text: "Hello", usage: { total_tokens: 3 } });
+  assert.deepEqual(capture.summarize(false), {
+    truncated: false,
+    text: "Hello",
+    usage: { total_tokens: 3 },
+  });
   assert.equal(capture.summarize(true).raw, stream);
 });
 
 test("ignores malformed events without losing the rest", () => {
   const capture = new ResponseCapture();
-  capture.add(bytes('data: {oops\n\ndata: {"type":"response.output_text.delta","delta":"ok"}\n\n'));
+  capture.add(
+    bytes(
+      'data: {oops\n\ndata: {"type":"response.output_text.delta","delta":"ok"}\n\n',
+    ),
+  );
   assert.equal(capture.summarize(false).text, "ok");
 });
 
 test("a non-stream JSON body is parsed", () => {
   const capture = new ResponseCapture();
   capture.add(bytes('{"error":{"message":"bad"}}'));
-  assert.deepEqual(capture.summarize(false), { truncated: false, body: { error: { message: "bad" } } });
+  assert.deepEqual(capture.summarize(false), {
+    truncated: false,
+    body: { error: { message: "bad" } },
+  });
 });
 
 test("a non-JSON body is kept as truncated text", () => {
@@ -48,5 +59,8 @@ test("stops collecting past the size cap and says so", () => {
 });
 
 test("an empty capture summarizes to an empty body", () => {
-  assert.deepEqual(new ResponseCapture().summarize(false), { truncated: false, body: "" });
+  assert.deepEqual(new ResponseCapture().summarize(false), {
+    truncated: false,
+    body: "",
+  });
 });

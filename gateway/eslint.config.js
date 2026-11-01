@@ -21,7 +21,11 @@ export default tseslint.config(
         "error",
         {
           allowForKnownSafeCalls: [
-            { from: "package", package: "node:test", name: ["test", "describe", "it"] },
+            {
+              from: "package",
+              package: "node:test",
+              name: ["test", "describe", "it"],
+            },
           ],
         },
       ],

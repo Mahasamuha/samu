@@ -11,7 +11,11 @@ enum class Where { LOCAL, REMOTE, HYBRID }
 enum class Tier { LOCAL, HYBRID, SERVER }
 
 /** A tool a capability groups. An optional tool that is missing doesn't make the capability unavailable. */
-data class CapabilityTool(val name: String, val where: Where, val required: Boolean = true)
+data class CapabilityTool(
+    val name: String,
+    val where: Where,
+    val required: Boolean = true,
+)
 
 /** What Samu can do, as a group of tools; the unit the model sees and binds (plan: phase 3.5). */
 data class Capability(
@@ -22,11 +26,12 @@ data class Capability(
     val tools: List<CapabilityTool>,
 ) {
     val tier: Tier
-        get() = when {
-            tools.all { it.where == Where.LOCAL } -> Tier.LOCAL
-            tools.all { it.where == Where.REMOTE } -> Tier.SERVER
-            else -> Tier.HYBRID
-        }
+        get() =
+            when {
+                tools.all { it.where == Where.LOCAL } -> Tier.LOCAL
+                tools.all { it.where == Where.REMOTE } -> Tier.SERVER
+                else -> Tier.HYBRID
+            }
 
     companion object {
         /**
@@ -34,12 +39,13 @@ data class Capability(
          * that is malformed, over a limit, or has an unknown `load` or `where` (e.g. from a newer server)
          * is skipped with a log, so one bad entry doesn't hide the rest.
          */
-        fun parseAll(array: JSONArray): List<Capability> =
-            parseEntries(array, "capability", IndexLimits.MAX_CAPABILITIES, ::parse)
+        fun parseAll(array: JSONArray): List<Capability> = parseEntries(array, "capability", IndexLimits.MAX_CAPABILITIES, ::parse)
 
         private fun parse(entry: JSONObject): Capability {
             val tools = entry.getJSONArray("tools")
-            require(tools.length() <= IndexLimits.MAX_TOOLS_PER_CAPABILITY) { "${tools.length()} tools (limit ${IndexLimits.MAX_TOOLS_PER_CAPABILITY})" }
+            require(tools.length() <= IndexLimits.MAX_TOOLS_PER_CAPABILITY) {
+                "${tools.length()} tools (limit ${IndexLimits.MAX_TOOLS_PER_CAPABILITY})"
+            }
             val description = entry.optString("description")
             IndexLimits.checkLength("description", description, IndexLimits.MAX_CAPABILITY_DESCRIPTION)
             return Capability(
@@ -47,14 +53,15 @@ data class Capability(
                 title = entry.optString("title"),
                 description = description,
                 load = enumValue<Load>(entry.getString("load")),
-                tools = (0 until tools.length()).map { j ->
-                    val tool = tools.getJSONObject(j)
-                    CapabilityTool(
-                        name = tool.getString("name"),
-                        where = enumValue<Where>(tool.getString("where")),
-                        required = tool.optBoolean("required", true),
-                    )
-                },
+                tools =
+                    (0 until tools.length()).map { j ->
+                        val tool = tools.getJSONObject(j)
+                        CapabilityTool(
+                            name = tool.getString("name"),
+                            where = enumValue<Where>(tool.getString("where")),
+                            required = tool.optBoolean("required", true),
+                        )
+                    },
             )
         }
 

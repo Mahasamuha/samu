@@ -38,14 +38,24 @@ type Reply = Response | Error | unknown;
  */
 export function stubFetch(route: (url: URL) => Reply): FetchCall[] {
   const calls: FetchCall[] = [];
-  mock.method(globalThis, "fetch", async (input: URL | string, init?: RequestInit) => {
-    const url = new URL(String(input));
-    calls.push({ url, headers: { ...(init?.headers as Record<string, string> | undefined) } });
-    const reply = route(url);
-    if (reply instanceof Error) throw reply;
-    if (reply instanceof Response) return reply;
-    return new Response(JSON.stringify(reply), { status: 200, headers: { "content-type": "application/json" } });
-  });
+  mock.method(
+    globalThis,
+    "fetch",
+    async (input: URL | string, init?: RequestInit) => {
+      const url = new URL(String(input));
+      calls.push({
+        url,
+        headers: { ...(init?.headers as Record<string, string> | undefined) },
+      });
+      const reply = route(url);
+      if (reply instanceof Error) throw reply;
+      if (reply instanceof Response) return reply;
+      return new Response(JSON.stringify(reply), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  );
   return calls;
 }
 

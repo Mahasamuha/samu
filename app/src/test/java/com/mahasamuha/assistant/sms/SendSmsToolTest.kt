@@ -9,10 +9,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SendSmsToolTest {
-    private class FakeSender(private val outcome: SmsSender.Outcome = SmsSender.Outcome.Sent) {
+    private class FakeSender(
+        private val outcome: SmsSender.Outcome = SmsSender.Outcome.Sent,
+    ) {
         val sent = mutableListOf<Pair<String, String>>()
 
-        suspend fun send(number: String, message: String): SmsSender.Outcome {
+        suspend fun send(
+            number: String,
+            message: String,
+        ): SmsSender.Outcome {
             sent += number to message
             return outcome
         }
@@ -21,8 +26,10 @@ class SendSmsToolTest {
     private val sender = FakeSender()
     private val tool = SendSmsTool(sender::send, contacts = null)
 
-    private fun args(number: String = "555 0100", message: String = "Running late") =
-        JSONObject().put("phone_number", number).put("message", message)
+    private fun args(
+        number: String = "555 0100",
+        message: String = "Running late",
+    ) = JSONObject().put("phone_number", number).put("message", message)
 
     private fun prepare(arguments: JSONObject) = runBlocking { tool.prepare(arguments) }
 

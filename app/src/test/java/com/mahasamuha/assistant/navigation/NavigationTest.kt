@@ -15,49 +15,107 @@ class NavigationTest {
     private class MemoryPrefs : SharedPreferences {
         val values = mutableMapOf<String, String?>()
 
-        override fun getString(key: String, defValue: String?) = values[key] ?: defValue
+        override fun getString(
+            key: String,
+            defValue: String?,
+        ) = values[key] ?: defValue
 
-        override fun edit() = object : SharedPreferences.Editor {
-            private val pending = mutableMapOf<String, String?>()
+        override fun edit() =
+            object : SharedPreferences.Editor {
+                private val pending = mutableMapOf<String, String?>()
 
-            override fun putString(key: String, value: String?) = also { pending[key] = value }
+                override fun putString(
+                    key: String,
+                    value: String?,
+                ) = also { pending[key] = value }
 
-            override fun apply() {
-                values.putAll(pending)
+                override fun apply() {
+                    values.putAll(pending)
+                }
+
+                override fun commit(): Boolean {
+                    apply()
+                    return true
+                }
+
+                override fun putStringSet(
+                    key: String,
+                    values: MutableSet<String>?,
+                ) = this
+
+                override fun putInt(
+                    key: String,
+                    value: Int,
+                ) = this
+
+                override fun putLong(
+                    key: String,
+                    value: Long,
+                ) = this
+
+                override fun putFloat(
+                    key: String,
+                    value: Float,
+                ) = this
+
+                override fun putBoolean(
+                    key: String,
+                    value: Boolean,
+                ) = this
+
+                override fun remove(key: String) = this
+
+                override fun clear() = this
             }
-
-            override fun commit(): Boolean {
-                apply()
-                return true
-            }
-
-            override fun putStringSet(key: String, values: MutableSet<String>?) = this
-            override fun putInt(key: String, value: Int) = this
-            override fun putLong(key: String, value: Long) = this
-            override fun putFloat(key: String, value: Float) = this
-            override fun putBoolean(key: String, value: Boolean) = this
-            override fun remove(key: String) = this
-            override fun clear() = this
-        }
 
         override fun getAll(): MutableMap<String, *> = values
-        override fun getStringSet(key: String, defValues: MutableSet<String>?) = defValues
-        override fun getInt(key: String, defValue: Int) = defValue
-        override fun getLong(key: String, defValue: Long) = defValue
-        override fun getFloat(key: String, defValue: Float) = defValue
-        override fun getBoolean(key: String, defValue: Boolean) = defValue
+
+        override fun getStringSet(
+            key: String,
+            defValues: MutableSet<String>?,
+        ) = defValues
+
+        override fun getInt(
+            key: String,
+            defValue: Int,
+        ) = defValue
+
+        override fun getLong(
+            key: String,
+            defValue: Long,
+        ) = defValue
+
+        override fun getFloat(
+            key: String,
+            defValue: Float,
+        ) = defValue
+
+        override fun getBoolean(
+            key: String,
+            defValue: Boolean,
+        ) = defValue
+
         override fun contains(key: String) = key in values
+
         override fun registerOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) {}
+
         override fun unregisterOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) {}
     }
 
     private val prefs = MemoryPrefs()
 
-    private val context = object : ContextWrapper(null) {
-        override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences = prefs
-    }
+    private val context =
+        object : ContextWrapper(null) {
+            override fun getSharedPreferences(
+                name: String?,
+                mode: Int,
+            ): SharedPreferences = prefs
+        }
 
-    private fun places(home: String = "", work: String = ""): SavedPlaces {
+    private fun places(
+        home: String = "",
+        work: String = "",
+    ): SavedPlaces {
         val places = SavedPlaces(context as Context)
         places.home = home
         places.work = work

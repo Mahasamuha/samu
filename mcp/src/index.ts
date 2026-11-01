@@ -15,7 +15,9 @@ const httpServer = createServer((req, res) => {
     else res.destroy();
   });
 });
-httpServer.listen(config.port, () => log("listening", { version: config.version, port: config.port }));
+httpServer.listen(config.port, () =>
+  log("listening", { version: config.version, port: config.port }),
+);
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {

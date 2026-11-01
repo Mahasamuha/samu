@@ -18,8 +18,14 @@ export class RateLimiter {
 
   /** Returns 0 if the request may proceed, otherwise the number of seconds to wait. */
   take(key: string, now = Date.now()): number {
-    const bucket = this.buckets.get(key) ?? { tokens: this.burst, updatedAt: now };
-    bucket.tokens = Math.min(this.burst, bucket.tokens + (now - bucket.updatedAt) * this.refillPerMs);
+    const bucket = this.buckets.get(key) ?? {
+      tokens: this.burst,
+      updatedAt: now,
+    };
+    bucket.tokens = Math.min(
+      this.burst,
+      bucket.tokens + (now - bucket.updatedAt) * this.refillPerMs,
+    );
     bucket.updatedAt = now;
     this.buckets.set(key, bucket);
 

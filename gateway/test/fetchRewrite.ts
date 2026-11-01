@@ -6,7 +6,15 @@ const realFetch = globalThis.fetch;
 
 if (from && to) {
   globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
-    const target = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    return realFetch(target.startsWith(from) ? to + target.slice(from.length) : input, init);
+    const target =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+    return realFetch(
+      target.startsWith(from) ? to + target.slice(from.length) : input,
+      init,
+    );
   }) as typeof fetch;
 }

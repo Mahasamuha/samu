@@ -1,11 +1,11 @@
 package com.mahasamuha.assistant.weather
 
-import java.time.LocalDate
-import java.time.LocalDateTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Test
+import java.time.LocalDate
+import java.time.LocalDateTime
 
 class OpenMeteoParseTest {
     private fun response(
@@ -20,7 +20,7 @@ class OpenMeteoParseTest {
           "daily": {"time":["2026-10-24","2026-10-25"],"temperature_2m_max":[60.1,58.0],"temperature_2m_min":[44.0,41.5],
                     "weather_code":[3,71],"precipitation_probability_max":[20,null]}
         }
-    """.trimIndent()
+        """.trimIndent()
 
     @Test
     fun shapesCurrentConditions() {
@@ -52,7 +52,14 @@ class OpenMeteoParseTest {
 
     @Test
     fun aNullPrecipitationChanceStaysNullRatherThanZero() {
-        val hours = parseForecast(response(hourlyTimes = """["2026-10-24T11:00","2026-10-24T12:00","2026-10-24T13:00"]""", hourlyProbability = "[null, 0, 5]"), Units.IMPERIAL).hours
+        val hours =
+            parseForecast(
+                response(
+                    hourlyTimes = """["2026-10-24T11:00","2026-10-24T12:00","2026-10-24T13:00"]""",
+                    hourlyProbability = "[null, 0, 5]",
+                ),
+                Units.IMPERIAL,
+            ).hours
         assertNull(hours[0].precipitationChance)
         assertEquals(0, hours[1].precipitationChance)
     }
@@ -68,18 +75,42 @@ class OpenMeteoParseTest {
     @Test
     fun weatherCodesMapToSpokenConditions() {
         val codes = listOf(0, 1, 2, 3, 45, 48, 51, 55, 56, 61, 63, 65, 66, 71, 75, 77, 80, 82, 85, 95, 96, 99, 1234)
-        val expected = listOf(
-            "clear", "mostly clear", "partly cloudy", "overcast", "fog", "fog", "drizzle", "drizzle", "freezing drizzle", "light rain", "rain",
-            "heavy rain", "freezing rain", "light snow", "heavy snow", "snow grains", "rain showers", "heavy rain showers", "snow showers",
-            "thunderstorms", "thunderstorms with hail", "thunderstorms with hail", "unknown",
-        )
+        val expected =
+            listOf(
+                "clear",
+                "mostly clear",
+                "partly cloudy",
+                "overcast",
+                "fog",
+                "fog",
+                "drizzle",
+                "drizzle",
+                "freezing drizzle",
+                "light rain",
+                "rain",
+                "heavy rain",
+                "freezing rain",
+                "light snow",
+                "heavy snow",
+                "snow grains",
+                "rain showers",
+                "heavy rain showers",
+                "snow showers",
+                "thunderstorms",
+                "thunderstorms with hail",
+                "thunderstorms with hail",
+                "unknown",
+            )
         // Minutes within one hour keep every row on one date, after "now".
         val minuteTimes = codes.indices.joinToString(",", "[", "]") { "\"2026-10-24T11:${it.toString().padStart(2, '0')}\"" }
-        val json = """
+        val json =
+            """
             {"current":{"time":"2026-10-24T10:00","temperature_2m":1,"apparent_temperature":1,"weather_code":0,"wind_speed_10m":1},
-             "hourly":{"time":$minuteTimes,"temperature_2m":${codes.map { 1.0 }},"precipitation_probability":${codes.map { 1 }},"weather_code":$codes},
+             "hourly":{"time":$minuteTimes,"temperature_2m":${codes.map {
+                1.0
+            }},"precipitation_probability":${codes.map { 1 }},"weather_code":$codes},
              "daily":{"time":[],"temperature_2m_max":[],"temperature_2m_min":[],"weather_code":[],"precipitation_probability_max":[]}}
-        """.trimIndent()
+            """.trimIndent()
         assertEquals(expected, parseForecast(json, Units.METRIC).hours.map { it.condition })
     }
 

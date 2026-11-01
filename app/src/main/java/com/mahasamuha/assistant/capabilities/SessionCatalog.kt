@@ -10,10 +10,18 @@ import com.mahasamuha.assistant.tools.ToolRegistry
 import com.mahasamuha.assistant.voice.TAG
 
 /** A capability that can be used in this session, with the tools it binds (optional missing ones left out). */
-class AvailableCapability(val capability: Capability, val tools: List<Tool>)
+class AvailableCapability(
+    val capability: Capability,
+    val tools: List<Tool>,
+)
 
 /** What a bind returned to the model. */
-class BindResult(val capability: String, val toolNames: List<String>, val instructions: String, val alreadyBound: Boolean)
+class BindResult(
+    val capability: String,
+    val toolNames: List<String>,
+    val instructions: String,
+    val alreadyBound: Boolean,
+)
 
 /**
  * The capabilities usable in one session. Eager ones are bound into [registry] at construction; lazy ones
@@ -61,8 +69,11 @@ class SessionCatalog(
         val already = id in bound
         bindTools(entry)
         // Skills already in the system prompt are not repeated.
-        val instructions = skills.filter { id in it.capabilities && it !in eagerSkills }.sortedBy { it.name }
-            .joinToString("\n\n") { it.asPromptSection() }
+        val instructions =
+            skills
+                .filter { id in it.capabilities && it !in eagerSkills }
+                .sortedBy { it.name }
+                .joinToString("\n\n") { it.asPromptSection() }
         if (!already) Log.i(TAG, "Bound capability $id: ${entry.tools.joinToString { it.definition.name }}")
         return BindResult(id, entry.tools.map { it.definition.name }, instructions, already)
     }
@@ -90,41 +101,56 @@ class SessionCatalog(
             val local = candidates.filter { (_, allowed) -> allowed }.map { (tool, _) -> tool }
             val localByName = local.associateBy { it.definition.name }
             // A local tool's name stays reserved even in a session that leaves the tool out.
-            val reserved = candidates.map { (tool, _) -> tool }.filterNot { it.allowRemote }.map { it.definition.name }.toSet() + UseCapabilityTool.NAME
+            val reserved =
+                candidates
+                    .map { (tool, _) -> tool }
+                    .filterNot { it.allowRemote }
+                    .map { it.definition.name }
+                    .toSet() +
+                    UseCapabilityTool.NAME
             // Remote tools that a local tool calls itself never reach the model.
             val privateNames = candidates.flatMap { (tool, _) -> tool.privateRemoteTools }.toSet()
 
-            val remoteByName = merged.flatMap { it.remoteDefinitions.values }
-                .distinctBy { it.name }
-                .filter { it.name !in privateNames }
-                .filter { definition ->
-                    (definition.name !in reserved).also { kept ->
-                        if (!kept) Log.w(TAG, "Ignoring remote ${definition.name}: the name is reserved or the local one doesn't allow a remote override")
+            val remoteByName =
+                merged
+                    .flatMap { it.remoteDefinitions.values }
+                    .distinctBy { it.name }
+                    .filter { it.name !in privateNames }
+                    .filter { definition ->
+                        (definition.name !in reserved).also { kept ->
+                            if (!kept) {
+                                Log.w(
+                                    TAG,
+                                    "Ignoring remote ${definition.name}: the name is reserved or the local one doesn't allow a remote override",
+                                )
+                            }
+                        }
+                    }.associate { definition ->
+                        val remote = remoteTool(definition)
+                        val shadowed = localByName[definition.name]
+                        definition.name to
+                            if (remote is ReadOnlyTool && shadowed is ReadOnlyTool) FallbackTool(remote, shadowed) else remote
+                    }
+
+            fun resolve(tool: CapabilityTool): Tool? =
+                when (tool.where) {
+                    Where.LOCAL -> localByName[tool.name]
+                    Where.REMOTE -> remoteByName[tool.name]
+                    Where.HYBRID -> remoteByName[tool.name] ?: localByName[tool.name]
+                }
+
+            val available =
+                merged.mapNotNull { (capability, _) ->
+                    val resolved = capability.tools.map { it to resolve(it) }
+                    val missing = resolved.filter { (tool, bound) -> bound == null && tool.required }.map { (tool, _) -> tool.name }
+                    val tools = resolved.mapNotNull { (_, bound) -> bound }
+                    if (missing.isNotEmpty() || tools.isEmpty()) {
+                        Log.i(TAG, "Capability ${capability.id} unavailable: missing ${missing.joinToString().ifEmpty { "all tools" }}")
+                        null
+                    } else {
+                        AvailableCapability(capability, tools)
                     }
                 }
-                .associate { definition ->
-                    val remote = remoteTool(definition)
-                    val shadowed = localByName[definition.name]
-                    definition.name to if (remote is ReadOnlyTool && shadowed is ReadOnlyTool) FallbackTool(remote, shadowed) else remote
-                }
-
-            fun resolve(tool: CapabilityTool): Tool? = when (tool.where) {
-                Where.LOCAL -> localByName[tool.name]
-                Where.REMOTE -> remoteByName[tool.name]
-                Where.HYBRID -> remoteByName[tool.name] ?: localByName[tool.name]
-            }
-
-            val available = merged.mapNotNull { (capability, _) ->
-                val resolved = capability.tools.map { it to resolve(it) }
-                val missing = resolved.filter { (tool, bound) -> bound == null && tool.required }.map { (tool, _) -> tool.name }
-                val tools = resolved.mapNotNull { (_, bound) -> bound }
-                if (missing.isNotEmpty() || tools.isEmpty()) {
-                    Log.i(TAG, "Capability ${capability.id} unavailable: missing ${missing.joinToString().ifEmpty { "all tools" }}")
-                    null
-                } else {
-                    AvailableCapability(capability, tools)
-                }
-            }
             return SessionCatalog(available, skills, source)
         }
     }

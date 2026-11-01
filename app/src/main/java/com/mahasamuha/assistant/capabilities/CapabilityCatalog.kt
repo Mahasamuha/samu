@@ -27,30 +27,51 @@ object CapabilityCatalog {
         val definitions = cached?.tools.orEmpty().associateBy { it.name }
         val bundledIds = bundled.map { it.id }.toSet()
 
-        val merged = bundled.map { capability ->
-            val fromIndex = indexed[capability.id]?.takeIf { capability.tier == Tier.HYBRID }
-            if (fromIndex == null) capability else mergeHybrid(capability, fromIndex)
-        }.toMutableList()
+        val merged =
+            bundled
+                .map { capability ->
+                    val fromIndex = indexed[capability.id]?.takeIf { capability.tier == Tier.HYBRID }
+                    if (fromIndex == null) capability else mergeHybrid(capability, fromIndex)
+                }.toMutableList()
 
         cached?.capabilities.orEmpty().forEach { fromIndex ->
             when {
                 fromIndex.id in bundledIds -> {
                     val owner = bundled.first { it.id == fromIndex.id }
-                    if (owner.tier != Tier.HYBRID) log("Ignoring index capability ${fromIndex.id}: the app's is ${owner.tier.name.lowercase()}")
+                    if (owner.tier !=
+                        Tier.HYBRID
+                    ) {
+                        log("Ignoring index capability ${fromIndex.id}: the app's is ${owner.tier.name.lowercase()}")
+                    }
                 }
-                fromIndex.tier == Tier.SERVER -> merged += fromIndex
-                else -> log("Ignoring index capability ${fromIndex.id}: ${fromIndex.tier.name.lowercase()} but unknown to the app")
+
+                fromIndex.tier == Tier.SERVER -> {
+                    merged += fromIndex
+                }
+
+                else -> {
+                    log("Ignoring index capability ${fromIndex.id}: ${fromIndex.tier.name.lowercase()} but unknown to the app")
+                }
             }
         }
 
         return merged.sortedBy { it.id }.map { capability ->
-            val remote = capability.tools.filter { it.where != Where.LOCAL }.mapNotNull { tool -> definitions[tool.name]?.let { tool.name to it } }
+            val remote =
+                capability.tools.filter { it.where != Where.LOCAL }.mapNotNull { tool ->
+                    definitions[tool.name]?.let {
+                        tool.name to
+                            it
+                    }
+                }
             MergedCapability(capability, remote.toMap())
         }
     }
 
     /** The APK's local tools stay; the index supplies the remote ones. A hybrid tool the index lacks keeps the bundled entry. */
-    private fun mergeHybrid(bundled: Capability, index: Capability): Capability {
+    private fun mergeHybrid(
+        bundled: Capability,
+        index: Capability,
+    ): Capability {
         val indexRemote = index.tools.filter { it.where != Where.LOCAL }
         val indexNames = indexRemote.map { it.name }.toSet()
         val kept = bundled.tools.filter { it.where == Where.LOCAL || (it.where == Where.HYBRID && it.name !in indexNames) }

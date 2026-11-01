@@ -11,11 +11,39 @@ import { silenceLogs, stubFetch, testConfig } from "./helpers.js";
 
 const catalog: CapabilityCatalog = {
   capabilities: [
-    { id: "search", title: "Search", description: "Web", load: "lazy", tools: [{ name: "web_search", where: "remote" }] },
-    { id: "weather", title: "Weather", description: "Weather", load: "lazy", tools: [{ name: "get_weather", where: "hybrid" }, { name: "get_weather_local", where: "local", required: false }] },
-    { id: "music", title: "Music", description: "Music", load: "lazy", tools: [{ name: "music_find", where: "remote" }] },
+    {
+      id: "search",
+      title: "Search",
+      description: "Web",
+      load: "lazy",
+      tools: [{ name: "web_search", where: "remote" }],
+    },
+    {
+      id: "weather",
+      title: "Weather",
+      description: "Weather",
+      load: "lazy",
+      tools: [
+        { name: "get_weather", where: "hybrid" },
+        { name: "get_weather_local", where: "local", required: false },
+      ],
+    },
+    {
+      id: "music",
+      title: "Music",
+      description: "Music",
+      load: "lazy",
+      tools: [{ name: "music_find", where: "remote" }],
+    },
   ],
-  skills: [{ name: "weather-skill", description: "d", capabilities: ["weather"], instructions: "Be brief." }],
+  skills: [
+    {
+      name: "weather-skill",
+      description: "d",
+      capabilities: ["weather"],
+      instructions: "Be brief.",
+    },
+  ],
 };
 
 beforeEach(() => silenceLogs());
@@ -29,42 +57,96 @@ async function connect(config: Config): Promise<Client> {
   return client;
 }
 
-const toolNames = async (config: Config) => (await (await connect(config)).listTools()).tools.map((t) => t.name).sort();
-const textOf = (r: { contents: object[] }) => (r.contents[0] as { text: string }).text;
-const firstText = (r: Awaited<ReturnType<Client["callTool"]>>) => (r.content as { text: string }[])[0]!.text;
+const toolNames = async (config: Config) =>
+  (await (await connect(config)).listTools()).tools.map((t) => t.name).sort();
+const textOf = (r: { contents: object[] }) =>
+  (r.contents[0] as { text: string }).text;
+const firstText = (r: Awaited<ReturnType<Client["callTool"]>>) =>
+  (r.content as { text: string }[])[0]!.text;
 
 test("only web_search is offered with no optional config", async () => {
-  assert.deepEqual(await toolNames(testConfig({ pirateWeatherApiKey: undefined })), ["web_search"]);
+  assert.deepEqual(
+    await toolNames(testConfig({ pirateWeatherApiKey: undefined })),
+    ["web_search"],
+  );
 });
 
 test("get_weather needs the Pirate Weather key", async () => {
-  assert.deepEqual(await toolNames(testConfig()), ["get_weather", "web_search"]);
+  assert.deepEqual(await toolNames(testConfig()), [
+    "get_weather",
+    "web_search",
+  ]);
 });
 
 test("music_find needs both the Plex URL and token", async () => {
   const base = { pirateWeatherApiKey: undefined };
-  assert.ok(!(await toolNames(testConfig({ ...base, plexUrl: "https://127.0.0.1:32400" }))).includes("music_find"));
-  assert.ok(!(await toolNames(testConfig({ ...base, plexToken: "t" }))).includes("music_find"));
-  assert.ok((await toolNames(testConfig({ ...base, plexUrl: "https://127.0.0.1:32400", plexToken: "t" }))).includes("music_find"));
+  assert.ok(
+    !(
+      await toolNames(
+        testConfig({ ...base, plexUrl: "https://127.0.0.1:32400" }),
+      )
+    ).includes("music_find"),
+  );
+  assert.ok(
+    !(await toolNames(testConfig({ ...base, plexToken: "t" }))).includes(
+      "music_find",
+    ),
+  );
+  assert.ok(
+    (
+      await toolNames(
+        testConfig({
+          ...base,
+          plexUrl: "https://127.0.0.1:32400",
+          plexToken: "t",
+        }),
+      )
+    ).includes("music_find"),
+  );
 });
 
 test("tool annotations: remote reads are read-only, music is not open-world", async () => {
-  const client = await connect(testConfig({ plexUrl: "https://127.0.0.1:32400", plexToken: "t" }));
-  const byName = new Map((await client.listTools()).tools.map((t) => [t.name, t.annotations]));
-  assert.deepEqual(byName.get("web_search"), { readOnlyHint: true, openWorldHint: true });
-  assert.deepEqual(byName.get("get_weather"), { readOnlyHint: true, openWorldHint: true });
-  assert.deepEqual(byName.get("music_find"), { readOnlyHint: true, openWorldHint: false });
+  const client = await connect(
+    testConfig({ plexUrl: "https://127.0.0.1:32400", plexToken: "t" }),
+  );
+  const byName = new Map(
+    (await client.listTools()).tools.map((t) => [t.name, t.annotations]),
+  );
+  assert.deepEqual(byName.get("web_search"), {
+    readOnlyHint: true,
+    openWorldHint: true,
+  });
+  assert.deepEqual(byName.get("get_weather"), {
+    readOnlyHint: true,
+    openWorldHint: true,
+  });
+  assert.deepEqual(byName.get("music_find"), {
+    readOnlyHint: true,
+    openWorldHint: false,
+  });
 });
 
 test("web_search runs through the tool and returns JSON results", async () => {
-  stubFetch(() => ({ grounding: { generic: [{ url: "https://a.example.invalid", title: "A", snippets: ["hello"] }] } }));
-  const result = await (await connect(testConfig())).callTool({ name: "web_search", arguments: { query: "hi" } });
-  assert.deepEqual(JSON.parse(firstText(result)), { results: [{ title: "A", url: "https://a.example.invalid", text: "hello" }] });
+  stubFetch(() => ({
+    grounding: {
+      generic: [
+        { url: "https://a.example.invalid", title: "A", snippets: ["hello"] },
+      ],
+    },
+  }));
+  const result = await (
+    await connect(testConfig())
+  ).callTool({ name: "web_search", arguments: { query: "hi" } });
+  assert.deepEqual(JSON.parse(firstText(result)), {
+    results: [{ title: "A", url: "https://a.example.invalid", text: "hello" }],
+  });
 });
 
 test("a failing upstream is an isError tool result", async () => {
   stubFetch(() => new Response("", { status: 500 }));
-  const result = await (await connect(testConfig())).callTool({ name: "web_search", arguments: { query: "hi" } });
+  const result = await (
+    await connect(testConfig())
+  ).callTool({ name: "web_search", arguments: { query: "hi" } });
   assert.equal(result.isError, true);
   assert.match(firstText(result), /Search service returned 500/);
 });
@@ -78,15 +160,29 @@ test("capability://index lists only capabilities whose tools this config registe
   assert.equal(content.mimeType, "application/json");
   const index = JSON.parse(content.text);
   assert.equal(index.version, 1);
-  assert.deepEqual(index.capabilities.map((c: { id: string }) => c.id), ["search", "weather"]);
-  assert.deepEqual(index.tools.map((t: { name: string }) => t.name), ["get_weather", "web_search"]);
-  assert.deepEqual(index.skills.map((s: { name: string }) => s.name), ["weather-skill"]);
+  assert.deepEqual(
+    index.capabilities.map((c: { id: string }) => c.id),
+    ["search", "weather"],
+  );
+  assert.deepEqual(
+    index.tools.map((t: { name: string }) => t.name),
+    ["get_weather", "web_search"],
+  );
+  assert.deepEqual(
+    index.skills.map((s: { name: string }) => s.name),
+    ["weather-skill"],
+  );
 });
 
 test("without the weather key the weather capability and its skill leave the index", async () => {
   const client = await connect(testConfig({ pirateWeatherApiKey: undefined }));
-  const index = JSON.parse(textOf(await client.readResource({ uri: "capability://index" })));
-  assert.deepEqual(index.capabilities.map((c: { id: string }) => c.id), ["search"]);
+  const index = JSON.parse(
+    textOf(await client.readResource({ uri: "capability://index" })),
+  );
+  assert.deepEqual(
+    index.capabilities.map((c: { id: string }) => c.id),
+    ["search"],
+  );
   assert.deepEqual(index.skills, []);
 });
 
@@ -105,7 +201,14 @@ before(async () => {
 after(() => new Promise<void>((resolve) => http.close(() => resolve())));
 
 const rpc = (body: string) =>
-  fetch(`${base}/mcp`, { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body });
+  fetch(`${base}/mcp`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+    },
+    body,
+  });
 
 test("GET /healthz reports ok and the version", async () => {
   const res = await fetch(`${base}/healthz`);
@@ -114,36 +217,66 @@ test("GET /healthz reports ok and the version", async () => {
 });
 
 test("other routes and methods are 404", async () => {
-  assert.equal((await fetch(`${base}/v1/responses`, { method: "POST", body: "{}" })).status, 404);
+  assert.equal(
+    (await fetch(`${base}/v1/responses`, { method: "POST", body: "{}" }))
+      .status,
+    404,
+  );
   assert.equal((await fetch(`${base}/mcp`)).status, 404);
-  assert.equal((await fetch(`${base}/healthz`, { method: "POST" })).status, 404);
+  assert.equal(
+    (await fetch(`${base}/healthz`, { method: "POST" })).status,
+    404,
+  );
 });
 
 test("POST /mcp answers with a plain JSON body, not an event stream", async () => {
-  const res = await rpc(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }));
+  const res = await rpc(
+    JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+  );
   assert.equal(res.status, 200);
   assert.match(res.headers.get("content-type") ?? "", /^application\/json/);
-  const json = (await res.json()) as { id: number; result: { tools: { name: string }[] } };
+  const json = (await res.json()) as {
+    id: number;
+    result: { tools: { name: string }[] };
+  };
   assert.equal(json.id, 1);
-  assert.deepEqual(json.result.tools.map((t) => t.name).sort(), ["get_weather", "web_search"]);
+  assert.deepEqual(json.result.tools.map((t) => t.name).sort(), [
+    "get_weather",
+    "web_search",
+  ]);
 });
 
 test("requests are stateless: no session id, and a second request needs no initialize", async () => {
-  const first = await rpc(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }));
+  const first = await rpc(
+    JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+  );
   assert.equal(first.headers.get("mcp-session-id"), null);
-  const second = await rpc(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }));
+  const second = await rpc(
+    JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
+  );
   assert.equal(second.status, 200);
 });
 
 test("malformed JSON is a 400 parse error", async () => {
   const res = await rpc("{nope");
   assert.equal(res.status, 400);
-  assert.deepEqual(await res.json(), { jsonrpc: "2.0", error: { code: -32700, message: "Parse error" }, id: null });
+  assert.deepEqual(await res.json(), {
+    jsonrpc: "2.0",
+    error: { code: -32700, message: "Parse error" },
+    id: null,
+  });
 });
 
 test("a body over the size limit is rejected", async () => {
-  const big = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: { pad: "x".repeat(maxBodyBytes) } });
+  const big = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/list",
+    params: { pad: "x".repeat(maxBodyBytes) },
+  });
   const res = await rpc(big);
   assert.equal(res.status, 413);
-  assert.deepEqual(await res.json(), { error: { message: "Request body too large", code: 413 } });
+  assert.deepEqual(await res.json(), {
+    error: { message: "Request body too large", code: 413 },
+  });
 });

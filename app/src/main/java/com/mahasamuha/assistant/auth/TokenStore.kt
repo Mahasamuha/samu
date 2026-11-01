@@ -21,7 +21,9 @@ import javax.crypto.spec.GCMParameterSpec
  * Android Keystore key. The key is StrongBox-backed when available, otherwise TEE-backed, and is only
  * usable while the device is unlocked, so the token can't be read while the phone is locked.
  */
-class TokenStore(context: Context) {
+class TokenStore(
+    context: Context,
+) {
     private val file = AtomicFile(File(context.noBackupFilesDir, "auth_state.bin"))
 
     fun exists(): Boolean = file.baseFile.exists()
@@ -48,9 +50,10 @@ class TokenStore(context: Context) {
         val bytes = file.readFully()
         val ivLength = bytes[0].toInt()
         val iv = bytes.copyOfRange(1, 1 + ivLength)
-        val cipher = Cipher.getInstance(TRANSFORMATION).apply {
-            init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv))
-        }
+        val cipher =
+            Cipher.getInstance(TRANSFORMATION).apply {
+                init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv))
+            }
         return String(cipher.doFinal(bytes, 1 + ivLength, bytes.size - 1 - ivLength), Charsets.UTF_8)
     }
 
@@ -82,13 +85,15 @@ class TokenStore(context: Context) {
     }
 
     private fun generateKey(strongBox: Boolean): SecretKey {
-        val spec = KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .setKeySize(256)
-            .setUnlockedDeviceRequired(true)
-            .setIsStrongBoxBacked(strongBox)
-            .build()
+        val spec =
+            KeyGenParameterSpec
+                .Builder(KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .setUnlockedDeviceRequired(true)
+                .setIsStrongBoxBacked(strongBox)
+                .build()
         return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE).apply { init(spec) }.generateKey()
     }
 

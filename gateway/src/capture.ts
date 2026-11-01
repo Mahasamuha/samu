@@ -36,8 +36,10 @@ export class ResponseCapture {
       let text = "";
       for (const payload of events) {
         const event = parseJson(payload) as StreamEvent | undefined;
-        if (event?.type === "response.output_text.delta") text += event.delta ?? "";
-        if (event?.type === "response.completed" && event.response?.usage) summary.usage = event.response.usage;
+        if (event?.type === "response.output_text.delta")
+          text += event.delta ?? "";
+        if (event?.type === "response.completed" && event.response?.usage)
+          summary.usage = event.response.usage;
       }
       summary.text = text;
     } else {

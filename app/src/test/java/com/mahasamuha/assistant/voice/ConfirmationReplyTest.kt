@@ -8,11 +8,32 @@ import org.junit.Test
 class ConfirmationReplyTest {
     private fun assertYes(vararg replies: String) = replies.forEach { assertTrue("\"$it\" should be a yes", ConfirmationReply.isYes(it)) }
 
-    private fun assertNotYes(vararg replies: String) = replies.forEach { assertFalse("\"$it\" should not be a yes", ConfirmationReply.isYes(it)) }
+    private fun assertNotYes(vararg replies: String) =
+        replies.forEach {
+            assertFalse("\"$it\" should not be a yes", ConfirmationReply.isYes(it))
+        }
 
     @Test
     fun acceptsPlainYesPhrases() {
-        assertYes("yes", "yeah", "yep", "yup", "sure", "ok", "okay", "correct", "confirm", "right", "send", "send it", "call", "do it", "go", "go ahead", "sounds good")
+        assertYes(
+            "yes",
+            "yeah",
+            "yep",
+            "yup",
+            "sure",
+            "ok",
+            "okay",
+            "correct",
+            "confirm",
+            "right",
+            "send",
+            "send it",
+            "call",
+            "do it",
+            "go",
+            "go ahead",
+            "sounds good",
+        )
     }
 
     @Test

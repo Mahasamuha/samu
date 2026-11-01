@@ -9,10 +9,11 @@ plugins {
 }
 
 // Real endpoints live in the gitignored config.local.properties (see config.example.properties).
-val localConfig = Properties().apply {
-    val file = rootProject.file("config.local.properties")
-    if (file.exists()) file.inputStream().use(::load)
-}
+val localConfig =
+    Properties().apply {
+        val file = rootProject.file("config.local.properties")
+        if (file.exists()) file.inputStream().use(::load)
+    }
 
 /**
  * Copies the skills marked `delivery: app` from the repo's skills/ folder into the APK's assets
@@ -28,7 +29,11 @@ abstract class BundleSkills : DefaultTask() {
 
     @TaskAction
     fun bundle() {
-        val out = outputDir.get().asFile.apply { deleteRecursively(); mkdirs() }
+        val out =
+            outputDir.get().asFile.apply {
+                deleteRecursively()
+                mkdirs()
+            }
         skillsDir.get().asFile.listFiles().orEmpty().filter { it.isDirectory }.sortedBy { it.name }.forEach { dir ->
             val file = File(dir, "SKILL.md").takeIf { it.isFile } ?: return@forEach
             val frontmatter = file.readText().substringAfter("---\n", "").substringBefore("\n---", "")
@@ -38,9 +43,10 @@ abstract class BundleSkills : DefaultTask() {
     }
 }
 
-val bundleSkills = tasks.register<BundleSkills>("bundleSkills") {
-    skillsDir.set(layout.projectDirectory.dir("../skills"))
-}
+val bundleSkills =
+    tasks.register<BundleSkills>("bundleSkills") {
+        skillsDir.set(layout.projectDirectory.dir("../skills"))
+    }
 
 /**
  * Writes the local and hybrid entries of the repo's capabilities manifest into the APK's assets (plan
@@ -67,14 +73,23 @@ abstract class BundleCapabilities : DefaultTask() {
 
         // Every local tool declares itself as `ToolDefinition(name = "<tool>", ...)`.
         val toolPattern = Regex("""ToolDefinition\(\s*name\s*=\s*"([^"]+)"""")
-        val appTools = sources.files.filter { it.extension == "kt" }
-            .flatMap { file -> toolPattern.findAll(file.readText()).map { it.groupValues[1] } }
-            .toSet()
+        val appTools =
+            sources.files
+                .filter { it.extension == "kt" }
+                .flatMap { file -> toolPattern.findAll(file.readText()).map { it.groupValues[1] } }
+                .toSet()
         if (appTools.isEmpty()) {
-            throw GradleException("Found no `ToolDefinition(name = \"...\")` in the app sources; the capability check can't run. Did the tool declaration style change?")
+            throw GradleException(
+                "Found no `ToolDefinition(name = \"...\")` in the app sources; the capability check can't run. Did the tool declaration style change?",
+            )
         }
 
-        fun tools(entry: Map<String, Any?>) = (entry["tools"] as List<*>).map { @Suppress("UNCHECKED_CAST") (it as Map<String, Any?>) }
+        fun tools(entry: Map<String, Any?>) =
+            (entry["tools"] as List<*>).map {
+                @Suppress("UNCHECKED_CAST")
+                (it as Map<String, Any?>)
+            }
+
         // Tier from `where`: local only = local, remote only = server, anything else = hybrid.
         fun isServerOnly(entry: Map<String, Any?>) = tools(entry).all { it["where"] == "remote" }
 
@@ -83,22 +98,31 @@ abstract class BundleCapabilities : DefaultTask() {
 
         val orphans = (appTools - covered).sorted()
         if (orphans.isNotEmpty()) {
-            throw GradleException("Local tools in no local or hybrid capability in capabilities/capabilities.json: ${orphans.joinToString()}")
+            throw GradleException(
+                "Local tools in no local or hybrid capability in capabilities/capabilities.json: ${orphans.joinToString()}",
+            )
         }
         val unknown = (covered - appTools).sorted()
         if (unknown.isNotEmpty()) {
-            throw GradleException("capabilities/capabilities.json lists local or hybrid tools the app doesn't register: ${unknown.joinToString()}")
+            throw GradleException(
+                "capabilities/capabilities.json lists local or hybrid tools the app doesn't register: ${unknown.joinToString()}",
+            )
         }
 
-        val out = outputDir.get().asFile.apply { deleteRecursively(); mkdirs() }
+        val out =
+            outputDir.get().asFile.apply {
+                deleteRecursively()
+                mkdirs()
+            }
         File(out, "capabilities.json").writeText(JsonOutput.prettyPrint(JsonOutput.toJson(mapOf("capabilities" to bundled))) + "\n")
     }
 }
 
-val bundleCapabilities = tasks.register<BundleCapabilities>("bundleCapabilities") {
-    manifest.set(layout.projectDirectory.file("../capabilities/capabilities.json"))
-    sources.from(fileTree("src/main/java") { include("**/*.kt") })
-}
+val bundleCapabilities =
+    tasks.register<BundleCapabilities>("bundleCapabilities") {
+        manifest.set(layout.projectDirectory.file("../capabilities/capabilities.json"))
+        sources.from(fileTree("src/main/java") { include("**/*.kt") })
+    }
 
 fun localConfigValue(key: String): String =
     localConfig.getProperty(key)?.takeIf { it.isNotBlank() }
@@ -106,11 +130,15 @@ fun localConfigValue(key: String): String =
 
 /** Runs a git command and returns its trimmed stdout, or null if git fails (no tags, no repo). */
 fun gitOutput(vararg args: String): String? {
-    val result = providers.exec {
-        commandLine("git", *args)
-        isIgnoreExitValue = true
-    }
-    return result.standardOutput.asText.get().trim().takeIf { result.result.get().exitValue == 0 && it.isNotEmpty() }
+    val result =
+        providers.exec {
+            commandLine("git", *args)
+            isIgnoreExitValue = true
+        }
+    return result.standardOutput.asText
+        .get()
+        .trim()
+        .takeIf { result.result.get().exitValue == 0 && it.isNotEmpty() }
 }
 
 // Version comes from the vX.Y.Z tags CI creates on main; before the first tag, a dev placeholder.

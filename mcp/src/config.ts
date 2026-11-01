@@ -48,16 +48,26 @@ function required(env: NodeJS.ProcessEnv, name: string): string {
   return value;
 }
 
-function units(env: NodeJS.ProcessEnv, name: string, fallback: Config["weatherUnits"]): Config["weatherUnits"] {
+function units(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  fallback: Config["weatherUnits"],
+): Config["weatherUnits"] {
   const value = env[name] || fallback;
-  if (value !== "us" && value !== "si" && value !== "ca" && value !== "uk") throw new ConfigError(`${name} must be us, si, ca or uk`);
+  if (value !== "us" && value !== "si" && value !== "ca" && value !== "uk")
+    throw new ConfigError(`${name} must be us, si, ca or uk`);
   return value;
 }
 
-function integer(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
+function integer(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  fallback: number,
+): number {
   const raw = env[name];
   if (raw === undefined || raw === "") return fallback;
   const value = Number(raw);
-  if (!Number.isInteger(value) || value < 0) throw new ConfigError(`${name} must be a non-negative integer`);
+  if (!Number.isInteger(value) || value < 0)
+    throw new ConfigError(`${name} must be a non-negative integer`);
   return value;
 }

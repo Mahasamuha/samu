@@ -1,8 +1,20 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
-import { exportJWK, generateKeyPair, type JWK, type CryptoKey, type KeyObject, SignJWT } from "jose";
+import {
+  exportJWK,
+  generateKeyPair,
+  type JWK,
+  type CryptoKey,
+  type KeyObject,
+  SignJWT,
+} from "jose";
 import type { Config } from "../src/config.js";
 
 export const ISSUER = "https://idp.example.invalid/application/o/samu/";
@@ -18,7 +30,9 @@ export interface TestKey {
 }
 
 export async function makeKey(kid = "key-1", alg = "RS256"): Promise<TestKey> {
-  const { privateKey, publicKey } = await generateKeyPair(alg, { extractable: true });
+  const { privateKey, publicKey } = await generateKeyPair(alg, {
+    extractable: true,
+  });
   const jwk = { ...(await exportJWK(publicKey)), kid, alg, use: "sig" };
   return { kid, alg, privateKey, jwk };
 }
@@ -32,8 +46,14 @@ export interface TokenOptions {
 }
 
 /** Signs a token that is valid by default; each option overrides (or, with null, omits) a claim. */
-export async function signToken(key: TestKey, options: TokenOptions = {}): Promise<string> {
-  const jwt = new SignJWT({}).setProtectedHeader({ alg: key.alg, kid: key.kid });
+export async function signToken(
+  key: TestKey,
+  options: TokenOptions = {},
+): Promise<string> {
+  const jwt = new SignJWT({}).setProtectedHeader({
+    alg: key.alg,
+    kid: key.kid,
+  });
   jwt.setIssuer(options.iss ?? ISSUER);
   if (options.aud !== null) jwt.setAudience(options.aud ?? AUDIENCE);
   if (options.sub !== null) jwt.setSubject(options.sub ?? "user-1");
@@ -86,7 +106,9 @@ export async function listen(handler: Handler): Promise<LocalServer> {
 }
 
 /** Serves a JWKS at /jwks and counts requests; `keys` can be changed between requests. */
-export async function jwksServer(keys: TestKey[]): Promise<LocalServer & { hits: () => number; keys: TestKey[] }> {
+export async function jwksServer(
+  keys: TestKey[],
+): Promise<LocalServer & { hits: () => number; keys: TestKey[] }> {
   let hits = 0;
   const state = { keys };
   const local = await listen((_req, res) => {
@@ -115,30 +137,49 @@ export interface RunningGateway {
  * Runs the real gateway entry point as a child process (it reads its config at import time).
  * The placeholder https issuer is redirected to `idpUrl` by the fetchRewrite preload.
  */
-export async function startGateway(idpUrl: string, env: Record<string, string>): Promise<RunningGateway> {
+export async function startGateway(
+  idpUrl: string,
+  env: Record<string, string>,
+): Promise<RunningGateway> {
   const port = await freePort();
   const root = path.dirname(new URL(import.meta.url).pathname);
   let output = "";
-  const child: ChildProcess = spawn(process.execPath, ["--import", path.join(root, "fetchRewrite.js"), path.join(root, "../src/index.js")], {
-    env: {
-      PATH: process.env.PATH ?? "",
-      PORT: String(port),
-      ISSUER_URL: ISSUER,
-      JWKS_URL: `${ISSUER}jwks`,
-      AUDIENCE,
-      UPSTREAM_VIRTUAL_KEY: "vk-test-secret",
-      TEST_FETCH_FROM: ISSUER,
-      TEST_FETCH_TO: `${idpUrl}/`,
-      ...env,
+  const child: ChildProcess = spawn(
+    process.execPath,
+    [
+      "--import",
+      path.join(root, "fetchRewrite.js"),
+      path.join(root, "../src/index.js"),
+    ],
+    {
+      env: {
+        PATH: process.env.PATH ?? "",
+        PORT: String(port),
+        ISSUER_URL: ISSUER,
+        JWKS_URL: `${ISSUER}jwks`,
+        AUDIENCE,
+        UPSTREAM_VIRTUAL_KEY: "vk-test-secret",
+        TEST_FETCH_FROM: ISSUER,
+        TEST_FETCH_TO: `${idpUrl}/`,
+        ...env,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
     },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  );
   child.stdout?.on("data", (d: Buffer) => (output += d));
   child.stderr?.on("data", (d: Buffer) => (output += d));
 
-  await waitFor(() => output.includes('"event":"listening"') || child.exitCode !== null);
-  if (child.exitCode !== null) throw new Error(`gateway exited at startup: ${output}`);
-  return { url: `http://127.0.0.1:${port}`, output: () => output, signal: (s) => child.kill(s), stop: () => stopChild(child) };
+  await waitFor(
+    () => output.includes('"event":"listening"') || child.exitCode !== null,
+  );
+  if (child.exitCode !== null)
+    throw new Error(`gateway exited at startup: ${output}`);
+  return {
+    url: `http://127.0.0.1:${port}`,
+    output: () => output,
+    signal: (s) => child.kill(s),
+    stop: () => stopChild(child),
+  };
 }
 
 function stopChild(child: ChildProcess): Promise<void> {
@@ -156,10 +197,14 @@ export async function freePort(): Promise<number> {
   return port;
 }
 
-export async function waitFor(condition: () => boolean | Promise<boolean>, timeoutMs = 5000): Promise<void> {
+export async function waitFor(
+  condition: () => boolean | Promise<boolean>,
+  timeoutMs = 5000,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!(await condition())) {
-    if (Date.now() > deadline) throw new Error("timed out waiting for condition");
+    if (Date.now() > deadline)
+      throw new Error("timed out waiting for condition");
     await new Promise((r) => setTimeout(r, 10));
   }
 }

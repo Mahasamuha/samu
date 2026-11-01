@@ -20,33 +20,55 @@ typealias CallTool = suspend (name: String, arguments: JSONObject) -> String
  * arguments it won't accept, i.e. the index may be out of date. A model's own bad arguments also trigger
  * it, which is acceptable since a refresh is cheap.
  */
-fun remoteTool(definition: ToolDefinition, callTool: CallTool, onStale: () -> Unit): Tool =
-    if (definition.annotations.readOnlyHint) RemoteReadOnlyTool(definition, callTool, onStale) else RemoteActionTool(definition, callTool, onStale)
+fun remoteTool(
+    definition: ToolDefinition,
+    callTool: CallTool,
+    onStale: () -> Unit,
+): Tool =
+    if (definition.annotations.readOnlyHint) {
+        RemoteReadOnlyTool(
+            definition,
+            callTool,
+            onStale,
+        )
+    } else {
+        RemoteActionTool(definition, callTool, onStale)
+    }
 
 /** Calls the tool, reporting a stale index before the failure goes to the model. */
-private suspend fun call(callTool: CallTool, definition: ToolDefinition, arguments: JSONObject, onStale: () -> Unit): String = try {
-    callTool(definition.name, arguments)
-} catch (e: McpStaleToolException) {
-    Log.w(TAG, "Server rejected ${definition.name} (${e.message}); refreshing the capability index")
-    onStale()
-    throw e
-}
+private suspend fun call(
+    callTool: CallTool,
+    definition: ToolDefinition,
+    arguments: JSONObject,
+    onStale: () -> Unit,
+): String =
+    try {
+        callTool(definition.name, arguments)
+    } catch (e: McpStaleToolException) {
+        Log.w(TAG, "Server rejected ${definition.name} (${e.message}); refreshing the capability index")
+        onStale()
+        throw e
+    }
 
 /**
  * A remote read-only tool that replaced a local one of the same name (plan §4b): the local one answers if
  * the remote call fails, e.g. Pirate Weather unreachable → the phone's Open-Meteo get_weather.
  */
-class FallbackTool(private val remote: ReadOnlyTool, private val local: ReadOnlyTool) : ReadOnlyTool {
+class FallbackTool(
+    private val remote: ReadOnlyTool,
+    private val local: ReadOnlyTool,
+) : ReadOnlyTool {
     override val definition: ToolDefinition = remote.definition
 
-    override suspend fun run(arguments: JSONObject): String = try {
-        remote.run(arguments)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Log.w(TAG, "Remote ${definition.name} failed; using the local one", e)
-        local.run(arguments)
-    }
+    override suspend fun run(arguments: JSONObject): String =
+        try {
+            remote.run(arguments)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Remote ${definition.name} failed; using the local one", e)
+            local.run(arguments)
+        }
 }
 
 private class RemoteReadOnlyTool(

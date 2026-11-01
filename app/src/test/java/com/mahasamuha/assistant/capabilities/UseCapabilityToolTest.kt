@@ -17,13 +17,14 @@ import org.junit.Test
 class UseCapabilityToolTest {
     private val skill = Skill("music-tips", "How to music", listOf("music"), "Say the artist.")
 
-    private fun catalog() = SessionCatalog.build(
-        candidates = listOf(FakeReadOnlyTool("play") to true, FakeReadOnlyTool("pause") to true),
-        merged = listOf(MergedCapability(capability("music", Load.LAZY, local("play"), local("pause")), emptyMap())),
-        skills = listOf(skill),
-        remoteTool = { error("no remote tools expected") },
-        source = "test",
-    )
+    private fun catalog() =
+        SessionCatalog.build(
+            candidates = listOf(FakeReadOnlyTool("play") to true, FakeReadOnlyTool("pause") to true),
+            merged = listOf(MergedCapability(capability("music", Load.LAZY, local("play"), local("pause")), emptyMap())),
+            skills = listOf(skill),
+            remoteTool = { error("no remote tools expected") },
+            source = "test",
+        )
 
     private fun tool() = UseCapabilityTool(catalog())
 
@@ -40,7 +41,10 @@ class UseCapabilityToolTest {
     fun resultListsToolsAndSkillInstructions() {
         val result = JSONObject(runBlocking { tool().run(JSONObject().put("id", " music ")) })
         assertEquals("music", result.getString("capability"))
-        assertEquals(listOf("play", "pause"), (0 until result.getJSONArray("tools").length()).map { result.getJSONArray("tools").getString(it) })
+        assertEquals(
+            listOf("play", "pause"),
+            (0 until result.getJSONArray("tools").length()).map { result.getJSONArray("tools").getString(it) },
+        )
         assertEquals(skill.asPromptSection(), result.getString("instructions"))
         assertFalse(result.has("note"))
     }

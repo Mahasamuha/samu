@@ -32,22 +32,22 @@ import com.mahasamuha.assistant.navigation.SavedPlaces
 import com.mahasamuha.assistant.remote.McpClient
 import com.mahasamuha.assistant.remote.remoteTool
 import com.mahasamuha.assistant.skills.BundledSkills
+import com.mahasamuha.assistant.skills.mergeSkills
 import com.mahasamuha.assistant.sms.SendSmsTool
 import com.mahasamuha.assistant.sms.SmsSender
-import com.mahasamuha.assistant.voice.TAG
 import com.mahasamuha.assistant.voice.LocationSource
 import com.mahasamuha.assistant.voice.PlatformLocationSource
+import com.mahasamuha.assistant.voice.TAG
 import com.mahasamuha.assistant.voice.VoicePreference
-import com.mahasamuha.assistant.skills.mergeSkills
 import com.mahasamuha.assistant.weather.OpenMeteoWeather
 import com.mahasamuha.assistant.weather.WeatherTool
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Holds the app-wide singletons; constructed by hand (no DI framework at this size). */
 class AssistantApp : Application() {
@@ -84,35 +84,37 @@ class AssistantApp : Application() {
     ): SessionCatalog {
         val fresh = if (indexRefresh.isCompleted) indexRefresh.await().getOrNull() else null
         val index = fresh ?: capabilityCache.current()
-        val source = when {
-            fresh != null -> "fresh"
-            index != null -> "cache (${index.ageMillis() / 60_000} min old)"
-            else -> "bundled"
-        }
+        val source =
+            when {
+                fresh != null -> "fresh"
+                index != null -> "cache (${index.ageMillis() / 60_000} min old)"
+                else -> "bundled"
+            }
         val contactsAllowed = granted(Manifest.permission.READ_CONTACTS)
         val telecom = getSystemService(TelecomManager::class.java)
         // Every local tool is built, with whether its permission is granted, so a local tool's name stays
         // reserved even in a session that leaves the tool out.
-        val candidates = listOf(
-            weatherTool to true,
-            FindContactTool(contacts) to contactsAllowed,
-            SendSmsTool(smsSender::send, contacts.takeIf { contactsAllowed }) to granted(Manifest.permission.SEND_SMS),
-            PlaceCallTool(
-                contacts.takeIf { contactsAllowed },
-                launch,
-                closePanel,
-                isEmergencyNumber = getSystemService(TelephonyManager::class.java)::isEmergencyNumber,
-                defaultDialerPackage = { telecom.defaultDialerPackage },
-                placeCall = { number -> placeCall(telecom, Uri.fromParts("tel", number, null)) },
-            ) to granted(Manifest.permission.CALL_PHONE),
-            NavigateTool(this, savedPlaces, contacts.takeIf { contactsAllowed }, launch, closePanel) to true,
-            // SET_ALARM is a normal permission, granted at install.
-            SetTimerTool(this, launch, closePanel) to true,
-            SetAlarmTool(this, launch, closePanel) to true,
-            // Symfonium takes plain broadcasts and the speaker scan needs only network state: no runtime permission.
-            PlayMusicTool(symfonium, speakerDirectory, mcpClient, closePanel) to true,
-            MusicControlTool(this, symfonium, speakerDirectory, closePanel, keepPaused) to true,
-        )
+        val candidates =
+            listOf(
+                weatherTool to true,
+                FindContactTool(contacts) to contactsAllowed,
+                SendSmsTool(smsSender::send, contacts.takeIf { contactsAllowed }) to granted(Manifest.permission.SEND_SMS),
+                PlaceCallTool(
+                    contacts.takeIf { contactsAllowed },
+                    launch,
+                    closePanel,
+                    isEmergencyNumber = getSystemService(TelephonyManager::class.java)::isEmergencyNumber,
+                    defaultDialerPackage = { telecom.defaultDialerPackage },
+                    placeCall = { number -> placeCall(telecom, Uri.fromParts("tel", number, null)) },
+                ) to granted(Manifest.permission.CALL_PHONE),
+                NavigateTool(this, savedPlaces, contacts.takeIf { contactsAllowed }, launch, closePanel) to true,
+                // SET_ALARM is a normal permission, granted at install.
+                SetTimerTool(this, launch, closePanel) to true,
+                SetAlarmTool(this, launch, closePanel) to true,
+                // Symfonium takes plain broadcasts and the speaker scan needs only network state: no runtime permission.
+                PlayMusicTool(symfonium, speakerDirectory, mcpClient, closePanel) to true,
+                MusicControlTool(this, symfonium, speakerDirectory, closePanel, keepPaused) to true,
+            )
         // A server skill with the same name as a bundled one overrides it (plan §4b).
         val skills = mergeSkills(this.skills, index?.skills.orEmpty())
         return SessionCatalog.build(
@@ -143,9 +145,13 @@ class AssistantApp : Application() {
     }
 
     private fun granted(permission: String) = checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+
     val skills by lazy { BundledSkills(assets).load() }
 
     // Only registered while CALL_PHONE is granted (sessionCatalog).
     @SuppressLint("MissingPermission")
-    private fun placeCall(telecom: TelecomManager, uri: Uri) = telecom.placeCall(uri, Bundle())
+    private fun placeCall(
+        telecom: TelecomManager,
+        uri: Uri,
+    ) = telecom.placeCall(uri, Bundle())
 }

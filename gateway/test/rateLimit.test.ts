@@ -9,7 +9,11 @@ test("allows a burst, then refuses with a wait time", () => {
   for (let i = 0; i < 3; i++) assert.equal(limiter.take("user", now), 0);
   assert.equal(limiter.take("user", now), 1);
   assert.equal(limiter.take("other-user", now), 0, "buckets are per key");
-  assert.equal(limiter.take("user", now + 1000), 0, "a token refills after a second");
+  assert.equal(
+    limiter.take("user", now + 1000),
+    0,
+    "a token refills after a second",
+  );
 });
 
 test("never accumulates more than the burst while idle", () => {

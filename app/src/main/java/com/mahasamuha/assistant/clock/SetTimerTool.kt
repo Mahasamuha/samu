@@ -24,34 +24,43 @@ class SetTimerTool(
     private val launch: (Intent) -> Unit,
     private val closePanel: () -> Unit,
 ) : ActionTool {
-
-    override val definition = ToolDefinition(
-        name = "set_timer",
-        description = "Start a countdown timer in the phone's Clock app. The phone announces it.",
-        inputSchema = JSONObject()
-            .put("type", "object")
-            .put("properties", JSONObject()
-                .put("duration_seconds", JSONObject()
-                    .put("type", "integer")
-                    .put("minimum", MIN_SECONDS)
-                    .put("maximum", MAX_SECONDS)
-                    .put("description", "Timer length in seconds."))
-                .put("label", JSONObject()
-                    .put("type", "string")
-                    .put("description", "Only when the user names the timer, e.g. \"pasta\". Omit otherwise.")))
-            .put("required", JSONArray().put("duration_seconds"))
-            .put("additionalProperties", false),
-        // A timer changes nothing that matters and is easy to dismiss; it's set at once and reported.
-        annotations = ToolAnnotations(title = "Timer", readOnlyHint = false, destructiveHint = false, openWorldHint = false),
-    )
+    override val definition =
+        ToolDefinition(
+            name = "set_timer",
+            description = "Start a countdown timer in the phone's Clock app. The phone announces it.",
+            inputSchema =
+                JSONObject()
+                    .put("type", "object")
+                    .put(
+                        "properties",
+                        JSONObject()
+                            .put(
+                                "duration_seconds",
+                                JSONObject()
+                                    .put("type", "integer")
+                                    .put("minimum", MIN_SECONDS)
+                                    .put("maximum", MAX_SECONDS)
+                                    .put("description", "Timer length in seconds."),
+                            ).put(
+                                "label",
+                                JSONObject()
+                                    .put("type", "string")
+                                    .put("description", "Only when the user names the timer, e.g. \"pasta\". Omit otherwise."),
+                            ),
+                    ).put("required", JSONArray().put("duration_seconds"))
+                    .put("additionalProperties", false),
+            // A timer changes nothing that matters and is easy to dismiss; it's set at once and reported.
+            annotations = ToolAnnotations(title = "Timer", readOnlyHint = false, destructiveHint = false, openWorldHint = false),
+        )
 
     override suspend fun prepare(arguments: JSONObject): PendingAction {
         val timer = resolveTimer(arguments)
         val seconds = timer.seconds
         val label = timer.label
-        val intent = Intent(AlarmClock.ACTION_SET_TIMER)
-            .putExtra(AlarmClock.EXTRA_LENGTH, seconds)
-            .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+        val intent =
+            Intent(AlarmClock.ACTION_SET_TIMER)
+                .putExtra(AlarmClock.EXTRA_LENGTH, seconds)
+                .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
         if (label != null) intent.putExtra(AlarmClock.EXTRA_MESSAGE, label)
         require(intent.resolveActivity(context.packageManager) != null) { "No clock app handles timers" }
 
@@ -67,7 +76,11 @@ private const val MIN_SECONDS = 1
 private const val MAX_SECONDS = 86_400
 
 /** A validated timer request and what is said about it. */
-internal class TimerRequest(val seconds: Int, val label: String?, val announcement: String)
+internal class TimerRequest(
+    val seconds: Int,
+    val label: String?,
+    val announcement: String,
+)
 
 /** Validates the model's arguments and builds the announcement from the resolved duration. Throws for bad arguments. */
 internal fun resolveTimer(arguments: JSONObject): TimerRequest {
@@ -88,4 +101,9 @@ internal fun spokenDuration(seconds: Int): String {
 }
 
 /** The model's label, trimmed and capped at 40 characters; null when empty. */
-internal fun cleanLabel(raw: String): String? = raw.trim().take(40).trim().ifEmpty { null }
+internal fun cleanLabel(raw: String): String? =
+    raw
+        .trim()
+        .take(40)
+        .trim()
+        .ifEmpty { null }

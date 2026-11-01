@@ -15,17 +15,28 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RemoteToolTest {
-    private class FakeCaller(private val outcome: () -> String) {
+    private class FakeCaller(
+        private val outcome: () -> String,
+    ) {
         val calls = mutableListOf<Pair<String, JSONObject>>()
 
-        suspend fun callTool(name: String, arguments: JSONObject): String {
+        suspend fun callTool(
+            name: String,
+            arguments: JSONObject,
+        ): String {
             calls += name to arguments
             return outcome()
         }
     }
 
     private var staleCalls = 0
-    private fun remote(def: com.mahasamuha.assistant.llm.ToolDefinition, caller: FakeCaller) = remoteTool(def, caller::callTool) { staleCalls++ }
+
+    private fun remote(
+        def: com.mahasamuha.assistant.llm.ToolDefinition,
+        caller: FakeCaller,
+    ) = remoteTool(def, caller::callTool) {
+        staleCalls++
+    }
 
     @Test
     fun readOnlyHintDecidesTheToolKind() {
@@ -40,7 +51,13 @@ class RemoteToolTest {
         val tool = remote(definition("search", readOnly = true), caller) as ReadOnlyTool
         assertEquals("""{"results":[]}""", runBlocking { tool.run(JSONObject().put("q", "x")) })
         assertEquals("search", caller.calls.single().first)
-        assertEquals("x", caller.calls.single().second.getString("q"))
+        assertEquals(
+            "x",
+            caller.calls
+                .single()
+                .second
+                .getString("q"),
+        )
         assertEquals(0, staleCalls)
     }
 

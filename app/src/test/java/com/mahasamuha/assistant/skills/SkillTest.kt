@@ -8,19 +8,20 @@ import org.junit.Test
 class SkillTest {
     @Test
     fun parsesFrontmatterAndInstructions() {
-        val skill = Skill.parse(
-            """
-            ---
-            name: calling
-            description: How to place calls
-            capabilities: [phone, contacts]
-            ---
+        val skill =
+            Skill.parse(
+                """
+                ---
+                name: calling
+                description: How to place calls
+                capabilities: [phone, contacts]
+                ---
 
-            Look the contact up first.
+                Look the contact up first.
 
-            Then call.
-            """.trimIndent(),
-        )
+                Then call.
+                """.trimIndent(),
+            )
         assertEquals("calling", skill.name)
         assertEquals("How to place calls", skill.description)
         assertEquals(listOf("phone", "contacts"), skill.capabilities)

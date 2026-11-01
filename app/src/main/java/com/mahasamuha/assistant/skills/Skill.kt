@@ -23,10 +23,21 @@ data class Skill(
             val end = normalized.indexOf("\n---", startIndex = 4)
             require(end >= 0) { "SKILL.md frontmatter isn't closed" }
 
-            val fields = normalized.substring(4, end).lines()
-                .mapNotNull { line -> line.split(":", limit = 2).takeIf { it.size == 2 }?.let { (k, v) -> k.trim() to v.trim() } }
-                .toMap()
-            val capabilities = fields["capabilities"]?.removeSurrounding("[", "]")?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+            val fields =
+                normalized
+                    .substring(4, end)
+                    .lines()
+                    .mapNotNull { line -> line.split(":", limit = 2).takeIf { it.size == 2 }?.let { (k, v) -> k.trim() to v.trim() } }
+                    .toMap()
+            val capabilities =
+                fields["capabilities"]
+                    ?.removeSurrounding(
+                        "[",
+                        "]",
+                    )?.split(",")
+                    ?.map { it.trim() }
+                    ?.filter { it.isNotEmpty() }
+                    .orEmpty()
 
             return Skill(
                 name = requireNotNull(fields["name"]?.takeIf { it.isNotEmpty() }) { "SKILL.md needs a name" },
@@ -39,19 +50,24 @@ data class Skill(
 }
 
 /** The bundled skills, except any a server skill of the same name overrides (plan §4b), then the server's. */
-fun mergeSkills(bundled: List<Skill>, server: List<Skill>): List<Skill> =
-    bundled.filter { skill -> server.none { it.name == skill.name } } + server
+fun mergeSkills(
+    bundled: List<Skill>,
+    server: List<Skill>,
+): List<Skill> = bundled.filter { skill -> server.none { it.name == skill.name } } + server
 
 /** Skills bundled into the APK at build time (`delivery: app`). */
-class BundledSkills(private val assets: AssetManager) {
-    fun load(): List<Skill> = assets.list(DIR).orEmpty().sorted().mapNotNull { name ->
-        try {
-            assets.open("$DIR/$name/SKILL.md").bufferedReader().use { Skill.parse(it.readText()) }
-        } catch (e: Exception) {
-            Log.w(TAG, "Skipping skill $name", e)
-            null
+class BundledSkills(
+    private val assets: AssetManager,
+) {
+    fun load(): List<Skill> =
+        assets.list(DIR).orEmpty().sorted().mapNotNull { name ->
+            try {
+                assets.open("$DIR/$name/SKILL.md").bufferedReader().use { Skill.parse(it.readText()) }
+            } catch (e: Exception) {
+                Log.w(TAG, "Skipping skill $name", e)
+                null
+            }
         }
-    }
 
     private companion object {
         const val DIR = "skills"

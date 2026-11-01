@@ -11,7 +11,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CapabilityCatalogTest {
-    private fun index(capabilities: List<Capability>, vararg toolNames: String) = CachedIndex(
+    private fun index(
+        capabilities: List<Capability>,
+        vararg toolNames: String,
+    ) = CachedIndex(
         principal = "user-1",
         fetchedAtMillis = 0,
         source = IndexSource.CACHE,
@@ -22,7 +25,10 @@ class CapabilityCatalogTest {
 
     private val logs = mutableListOf<String>()
 
-    private fun merge(bundled: List<Capability>, cached: CachedIndex?) = CapabilityCatalog.merge(bundled, cached) { logs += it }
+    private fun merge(
+        bundled: List<Capability>,
+        cached: CachedIndex?,
+    ) = CapabilityCatalog.merge(bundled, cached) { logs += it }
 
     @Test
     fun withoutAnIndexTheBundledCapabilitiesAreAllThereIs() {
@@ -82,7 +88,12 @@ class CapabilityCatalogTest {
         assertEquals("server text", merged.capability.description)
         assertEquals(Load.LAZY, merged.capability.load)
         assertEquals(listOf("get_weather", "pirate_forecast"), merged.capability.tools.map { it.name })
-        assertEquals(Where.REMOTE, merged.capability.tools.last().where)
+        assertEquals(
+            Where.REMOTE,
+            merged.capability.tools
+                .last()
+                .where,
+        )
         assertEquals(setOf("pirate_forecast"), merged.remoteDefinitions.keys)
     }
 
@@ -111,7 +122,12 @@ class CapabilityCatalogTest {
         val bundled = capability("w", Load.EAGER, local("a"), hybrid("h"))
         val fromIndex = capability("w", Load.EAGER, local("sneaky"), remote("h"))
         val merged = merge(listOf(bundled), index(listOf(fromIndex), "h")).single()
-        assertEquals(setOf("a", "h"), merged.capability.tools.map { it.name }.toSet())
+        assertEquals(
+            setOf("a", "h"),
+            merged.capability.tools
+                .map { it.name }
+                .toSet(),
+        )
     }
 
     @Test

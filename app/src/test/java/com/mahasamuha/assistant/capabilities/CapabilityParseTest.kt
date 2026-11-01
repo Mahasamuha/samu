@@ -8,8 +8,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CapabilityParseTest {
-    private fun entry(id: String, load: String = "lazy", tools: String = """[{"name":"t","where":"local"}]""", extra: String = "") =
-        """{"id":"$id","title":"T","description":"d","load":"$load","tools":$tools$extra}"""
+    private fun entry(
+        id: String,
+        load: String = "lazy",
+        tools: String = """[{"name":"t","where":"local"}]""",
+        extra: String = "",
+    ) = """{"id":"$id","title":"T","description":"d","load":"$load","tools":$tools$extra}"""
 
     private fun parse(vararg entries: String) = Capability.parseAll(JSONArray("[${entries.joinToString(",")}]"))
 
@@ -32,12 +36,13 @@ class CapabilityParseTest {
 
     @Test
     fun skipsEntriesWithUnknownLoadOrWhereButKeepsTheRest() {
-        val result = parse(
-            entry("good1"),
-            entry("badLoad", load = "sometimes"),
-            entry("badWhere", tools = """[{"name":"t","where":"cloud"}]"""),
-            entry("good2"),
-        )
+        val result =
+            parse(
+                entry("good1"),
+                entry("badLoad", load = "sometimes"),
+                entry("badWhere", tools = """[{"name":"t","where":"cloud"}]"""),
+                entry("good2"),
+            )
         assertEquals(listOf("good1", "good2"), result.map { it.id })
     }
 
@@ -59,10 +64,11 @@ class CapabilityParseTest {
     fun skipsEntryWithOverlongDescriptionInsteadOfTruncating() {
         val long = "x".repeat(IndexLimits.MAX_CAPABILITY_DESCRIPTION + 1)
         val exact = "x".repeat(IndexLimits.MAX_CAPABILITY_DESCRIPTION)
-        val result = parse(
-            """{"id":"long","description":"$long","load":"lazy","tools":[{"name":"t","where":"local"}]}""",
-            """{"id":"exact","description":"$exact","load":"lazy","tools":[{"name":"t","where":"local"}]}""",
-        )
+        val result =
+            parse(
+                """{"id":"long","description":"$long","load":"lazy","tools":[{"name":"t","where":"local"}]}""",
+                """{"id":"exact","description":"$exact","load":"lazy","tools":[{"name":"t","where":"local"}]}""",
+            )
         assertEquals(listOf("exact"), result.map { it.id })
         assertEquals(exact, result.single().description)
     }

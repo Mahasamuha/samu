@@ -9,11 +9,11 @@ import com.mahasamuha.assistant.remote.McpClient
 import com.mahasamuha.assistant.remote.toolDefinition
 import com.mahasamuha.assistant.skills.Skill
 import com.mahasamuha.assistant.voice.TAG
-import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.File
 
 /** Where an index came from: fetched just now, or read from disk. (No index at all means the bundled manifest alone.) */
 enum class IndexSource { FRESH, CACHE }
@@ -67,8 +67,8 @@ class CapabilityCache(
      * result carries the error. The new index is parsed before it's stored, so a bad document never
      * replaces a good one.
      */
-    suspend fun refresh(): Result<CachedIndex> {
-        return try {
+    suspend fun refresh(): Result<CachedIndex> =
+        try {
             val principal = auth.principal() ?: throw NotSignedInException()
             val text = client.readResource(INDEX_URI)
             val fresh = withContext(Dispatchers.IO) { parseCapabilityIndex(text, principal, System.currentTimeMillis(), IndexSource.FRESH) }
@@ -84,7 +84,10 @@ class CapabilityCache(
                 }
             }
             if (!stillSame) throw NotSignedInException()
-            Log.i(TAG, "Capability index refreshed: ${fresh.capabilities.size} capabilities, ${fresh.tools.size} tools, ${fresh.skills.size} skills")
+            Log.i(
+                TAG,
+                "Capability index refreshed: ${fresh.capabilities.size} capabilities, ${fresh.tools.size} tools, ${fresh.skills.size} skills",
+            )
             Result.success(fresh)
         } catch (e: CancellationException) {
             throw e
@@ -92,14 +95,14 @@ class CapabilityCache(
             Log.w(TAG, "Capability index refresh failed", e)
             Result.failure(e)
         }
-    }
 
     /** Deletes the cache (sign-out). */
-    fun clear() = synchronized(lock) {
-        file.delete()
-        index = null
-        loaded = true
-    }
+    fun clear() =
+        synchronized(lock) {
+            file.delete()
+            index = null
+            loaded = true
+        }
 
     private fun readFile(): CachedIndex? {
         if (!file.baseFile.exists()) return null
@@ -114,11 +117,15 @@ class CapabilityCache(
     }
 
     /** Written to a temporary file and renamed into place by [AtomicFile]. */
-    private fun write(text: String, parsed: CachedIndex) {
-        val stored = JSONObject()
-            .put("principal", parsed.principal)
-            .put("fetchedAt", parsed.fetchedAtMillis)
-            .put("index", text)
+    private fun write(
+        text: String,
+        parsed: CachedIndex,
+    ) {
+        val stored =
+            JSONObject()
+                .put("principal", parsed.principal)
+                .put("fetchedAt", parsed.fetchedAtMillis)
+                .put("index", text)
         val out = file.startWrite()
         try {
             out.write(stored.toString().toByteArray(Charsets.UTF_8))
@@ -137,7 +144,12 @@ class CapabilityCache(
 private const val SUPPORTED_VERSION = 1
 
 /** Parses and validates a `capability://index` document (version, per-entry limits); throws when the document as a whole is unusable. */
-internal fun parseCapabilityIndex(text: String, principal: String, fetchedAt: Long, source: IndexSource): CachedIndex {
+internal fun parseCapabilityIndex(
+    text: String,
+    principal: String,
+    fetchedAt: Long,
+    source: IndexSource,
+): CachedIndex {
     val json = JSONObject(text)
     val version = json.optInt("version")
     if (version != SUPPORTED_VERSION) throw IllegalStateException("Unsupported capability index version $version")
@@ -162,12 +174,13 @@ private fun parseTool(entry: JSONObject): ToolDefinition {
 
 private fun parseSkill(entry: JSONObject): Skill {
     val attached = entry.optJSONArray("capabilities")
-    val skill = Skill(
-        name = entry.getString("name"),
-        description = entry.optString("description"),
-        capabilities = (0 until (attached?.length() ?: 0)).map { attached!!.getString(it) },
-        instructions = entry.optString("instructions"),
-    )
+    val skill =
+        Skill(
+            name = entry.getString("name"),
+            description = entry.optString("description"),
+            capabilities = (0 until (attached?.length() ?: 0)).map { attached!!.getString(it) },
+            instructions = entry.optString("instructions"),
+        )
     IndexLimits.checkLength("description", skill.description, IndexLimits.MAX_SKILL_DESCRIPTION)
     IndexLimits.checkLength("instructions", skill.instructions, IndexLimits.MAX_SKILL_INSTRUCTIONS)
     return skill

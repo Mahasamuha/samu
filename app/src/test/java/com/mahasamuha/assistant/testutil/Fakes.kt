@@ -15,7 +15,12 @@ import com.mahasamuha.assistant.tools.PendingAction
 import com.mahasamuha.assistant.tools.ReadOnlyTool
 import org.json.JSONObject
 
-fun definition(name: String, readOnly: Boolean = true, openWorld: Boolean = false, title: String? = null) = ToolDefinition(
+fun definition(
+    name: String,
+    readOnly: Boolean = true,
+    openWorld: Boolean = false,
+    title: String? = null,
+) = ToolDefinition(
     name = name,
     description = "$name description",
     inputSchema = JSONObject().put("type", "object"),
@@ -61,7 +66,9 @@ class FakeActionTool(
 }
 
 /** Answers every confirmation with [reply] and remembers what it was asked. */
-class RecordingConfirmer(var reply: ConfirmationResult = ConfirmationResult.Confirmed) : Confirmer {
+class RecordingConfirmer(
+    var reply: ConfirmationResult = ConfirmationResult.Confirmed,
+) : Confirmer {
     val asked = mutableListOf<Confirmation>()
 
     override suspend fun confirm(confirmation: Confirmation): ConfirmationResult {
@@ -70,7 +77,10 @@ class RecordingConfirmer(var reply: ConfirmationResult = ConfirmationResult.Conf
     }
 }
 
-fun call(name: String, arguments: String = "{}") = ToolCall("call-$name", name, arguments)
+fun call(
+    name: String,
+    arguments: String = "{}",
+) = ToolCall("call-$name", name, arguments)
 
 fun capability(
     id: String,
@@ -79,8 +89,17 @@ fun capability(
     description: String = "$id description",
 ) = Capability(id, id.replaceFirstChar { it.uppercase() }, description, load, tools.toList())
 
-fun local(name: String, required: Boolean = true) = CapabilityTool(name, Where.LOCAL, required)
+fun local(
+    name: String,
+    required: Boolean = true,
+) = CapabilityTool(name, Where.LOCAL, required)
 
-fun remote(name: String, required: Boolean = true) = CapabilityTool(name, Where.REMOTE, required)
+fun remote(
+    name: String,
+    required: Boolean = true,
+) = CapabilityTool(name, Where.REMOTE, required)
 
-fun hybrid(name: String, required: Boolean = true) = CapabilityTool(name, Where.HYBRID, required)
+fun hybrid(
+    name: String,
+    required: Boolean = true,
+) = CapabilityTool(name, Where.HYBRID, required)

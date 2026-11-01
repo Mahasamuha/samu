@@ -6,11 +6,11 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
@@ -34,7 +34,11 @@ import androidx.compose.ui.unit.dp
 
 /** Ink fill (paper on the dark variant). One per view. */
 @Composable
-fun PrimaryButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun PrimaryButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = AppTheme.colors
     Button(
         onClick = onClick,
@@ -49,7 +53,11 @@ fun PrimaryButton(label: String, onClick: () -> Unit, modifier: Modifier = Modif
 
 /** Hairline outline, full-strength text: an action that isn't the primary but should still read as a button. */
 @Composable
-fun SecondaryButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun SecondaryButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = AppTheme.colors
     OutlinedButton(
         onClick = onClick,
@@ -65,7 +73,11 @@ fun SecondaryButton(label: String, onClick: () -> Unit, modifier: Modifier = Mod
 
 /** Text only, at 0.75 opacity: the secondary action next to a primary. */
 @Composable
-fun GhostButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun GhostButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     TextButton(
         onClick = onClick,
         modifier = modifier,
@@ -80,19 +92,28 @@ fun GhostButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifie
 
 /** Geist Mono uppercase metadata. Separate parts with " · ". */
 @Composable
-fun MonoLabel(text: String, modifier: Modifier = Modifier, color: Color = AppTheme.colors.textMuted) {
+fun MonoLabel(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = AppTheme.colors.textMuted,
+) {
     Text(text.uppercase(), modifier = modifier, style = AppType.eyebrow, color = color)
 }
 
 /** The user's words in indigo, or the assistant's on a faint tint. The 4dp corner is the tail. */
 @Composable
-fun ChatBubble(text: String, fromUser: Boolean, modifier: Modifier = Modifier) {
+fun ChatBubble(
+    text: String,
+    fromUser: Boolean,
+    modifier: Modifier = Modifier,
+) {
     val colors = AppTheme.colors
     val shape = if (fromUser) RoundedCornerShape(14.dp, 14.dp, 4.dp, 14.dp) else RoundedCornerShape(14.dp, 14.dp, 14.dp, 4.dp)
     Box(
-        modifier = modifier
-            .background(if (fromUser) colors.bubbleUser else colors.bubbleAssistant, shape)
-            .padding(horizontal = 14.dp, vertical = if (fromUser) 10.dp else 12.dp),
+        modifier =
+            modifier
+                .background(if (fromUser) colors.bubbleUser else colors.bubbleAssistant, shape)
+                .padding(horizontal = 14.dp, vertical = if (fromUser) 10.dp else 12.dp),
     ) {
         Text(text, style = AppType.body, color = if (fromUser) colors.onBubbleUser else colors.text)
     }
@@ -100,29 +121,39 @@ fun ChatBubble(text: String, fromUser: Boolean, modifier: Modifier = Modifier) {
 
 /** A sage dot when done; an empty ring when not. */
 @Composable
-fun StatusDot(done: Boolean, modifier: Modifier = Modifier) {
+fun StatusDot(
+    done: Boolean,
+    modifier: Modifier = Modifier,
+) {
     val colors = AppTheme.colors
     Box(
-        modifier = modifier
-            .size(8.dp)
-            .then(if (done) Modifier.background(colors.status, CircleShape) else Modifier.border(1.dp, colors.textMuted, CircleShape)),
+        modifier =
+            modifier
+                .size(8.dp)
+                .then(if (done) Modifier.background(colors.status, CircleShape) else Modifier.border(1.dp, colors.textMuted, CircleShape)),
     )
 }
 
 /** A dot that fades in and out while something is in progress; steady when [active] is false. */
 @Composable
-fun PulseDot(active: Boolean, color: Color, modifier: Modifier = Modifier) {
-    val pulse = rememberInfiniteTransition(label = "pulse").animateFloat(
-        initialValue = 1f,
-        targetValue = 0.25f,
-        animationSpec = infiniteRepeatable(tween(PULSE_MS), RepeatMode.Reverse),
-        label = "pulse-alpha",
-    )
+fun PulseDot(
+    active: Boolean,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    val pulse =
+        rememberInfiniteTransition(label = "pulse").animateFloat(
+            initialValue = 1f,
+            targetValue = 0.25f,
+            animationSpec = infiniteRepeatable(tween(PULSE_MS), RepeatMode.Reverse),
+            label = "pulse-alpha",
+        )
     Box(
-        modifier = modifier
-            .size(8.dp)
-            .alpha(if (active) pulse.value else 1f)
-            .background(color, CircleShape),
+        modifier =
+            modifier
+                .size(8.dp)
+                .alpha(if (active) pulse.value else 1f)
+                .background(color, CircleShape),
     )
 }
 
@@ -132,18 +163,20 @@ fun TypingBubble(modifier: Modifier = Modifier) {
     val colors = AppTheme.colors
     val transition = rememberInfiniteTransition(label = "typing")
     Row(
-        modifier = modifier
-            .background(colors.bubbleAssistant, RoundedCornerShape(14.dp, 14.dp, 14.dp, 4.dp))
-            .padding(horizontal = 16.dp, vertical = 16.dp),
+        modifier =
+            modifier
+                .background(colors.bubbleAssistant, RoundedCornerShape(14.dp, 14.dp, 14.dp, 4.dp))
+                .padding(horizontal = 16.dp, vertical = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         repeat(3) { i ->
-            val alpha = transition.animateFloat(
-                initialValue = 1f,
-                targetValue = 0.25f,
-                animationSpec = infiniteRepeatable(tween(PULSE_MS), RepeatMode.Reverse, StartOffset(i * PULSE_MS / 3)),
-                label = "typing-dot-$i",
-            )
+            val alpha =
+                transition.animateFloat(
+                    initialValue = 1f,
+                    targetValue = 0.25f,
+                    animationSpec = infiniteRepeatable(tween(PULSE_MS), RepeatMode.Reverse, StartOffset(i * PULSE_MS / 3)),
+                    label = "typing-dot-$i",
+                )
             Box(Modifier.size(6.dp).alpha(alpha.value).background(colors.textMuted, CircleShape))
         }
     }

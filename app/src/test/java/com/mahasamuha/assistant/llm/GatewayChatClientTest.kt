@@ -12,7 +12,10 @@ import org.junit.Test
 class GatewayChatClientTest {
     private fun JSONArray.objects() = (0 until length()).map { getJSONObject(it) }
 
-    private fun body(messages: List<ChatMessage>, options: ChatOptions = ChatOptions()) = requestBody(messages, options)
+    private fun body(
+        messages: List<ChatMessage>,
+        options: ChatOptions = ChatOptions(),
+    ) = requestBody(messages, options)
 
     @Test
     fun systemMessagesBecomeInstructionsAndAreNotInput() {
@@ -65,7 +68,10 @@ class GatewayChatClientTest {
 
     @Test
     fun anAssistantTurnWithNoTextAddsNoEmptyMessage() {
-        val items = body(listOf(ChatMessage(Role.ASSISTANT, null, toolCalls = listOf(ToolCall("c1", "t", "{}"))))).getJSONArray("input").objects()
+        val items =
+            body(
+                listOf(ChatMessage(Role.ASSISTANT, null, toolCalls = listOf(ToolCall("c1", "t", "{}")))),
+            ).getJSONArray("input").objects()
         assertEquals(listOf("function_call"), items.map { it.getString("type") })
     }
 
@@ -79,14 +85,15 @@ class GatewayChatClientTest {
 
     @Test
     fun conversationOrderIsPreserved() {
-        val input = body(
-            listOf(
-                ChatMessage(Role.SYSTEM, "s"),
-                ChatMessage(Role.USER, "u1"),
-                ChatMessage(Role.ASSISTANT, "a1"),
-                ChatMessage(Role.USER, "u2"),
-            ),
-        ).getJSONArray("input").objects()
+        val input =
+            body(
+                listOf(
+                    ChatMessage(Role.SYSTEM, "s"),
+                    ChatMessage(Role.USER, "u1"),
+                    ChatMessage(Role.ASSISTANT, "a1"),
+                    ChatMessage(Role.USER, "u2"),
+                ),
+            ).getJSONArray("input").objects()
         assertEquals(listOf("u1", "a1", "u2"), input.map { it.getString("content") })
     }
 
@@ -103,12 +110,13 @@ class GatewayChatClientTest {
 
     @Test
     fun reasoningItemsAreDroppedAndFunctionCallsExtracted() {
-        val items = listOf(
-            JSONObject("""{"type":"reasoning","summary":[]}"""),
-            JSONObject("""{"type":"message","content":[]}"""),
-            JSONObject("""{"type":"function_call","call_id":"c1","name":"find_contact","arguments":"{\"name\":\"Sam\"}"}"""),
-            JSONObject("""{"type":"function_call","call_id":"c2","name":"set_timer"}"""),
-        )
+        val items =
+            listOf(
+                JSONObject("""{"type":"reasoning","summary":[]}"""),
+                JSONObject("""{"type":"message","content":[]}"""),
+                JSONObject("""{"type":"function_call","call_id":"c1","name":"find_contact","arguments":"{\"name\":\"Sam\"}"}"""),
+                JSONObject("""{"type":"function_call","call_id":"c2","name":"set_timer"}"""),
+            )
         val (kept, calls) = replayAndCalls(items)
 
         assertEquals(listOf("message", "function_call", "function_call"), kept.map { it.getString("type") })

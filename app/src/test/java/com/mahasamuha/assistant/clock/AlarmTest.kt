@@ -1,21 +1,31 @@
 package com.mahasamuha.assistant.clock
 
-import java.time.ZoneId
-import java.time.ZonedDateTime
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.ZoneId
+import java.time.ZonedDateTime
 
 class AlarmTest {
-    private fun at(hour: Int, minute: Int) = ZonedDateTime.of(2026, 10, 24, hour, minute, 0, 0, ZoneId.of("UTC"))
+    private fun at(
+        hour: Int,
+        minute: Int,
+    ) = ZonedDateTime.of(2026, 10, 24, hour, minute, 0, 0, ZoneId.of("UTC"))
 
-    private fun resolve(json: String, now: ZonedDateTime = at(12, 0)) = resolveAlarm(JSONObject(json), now)
+    private fun resolve(
+        json: String,
+        now: ZonedDateTime = at(12, 0),
+    ) = resolveAlarm(JSONObject(json), now)
 
-    private fun announce(hour: Int, minute: Int, now: ZonedDateTime = at(12, 0), extra: String = "") =
-        resolve("""{"hour":$hour,"minute":$minute$extra}""", now).announcement
+    private fun announce(
+        hour: Int,
+        minute: Int,
+        now: ZonedDateTime = at(12, 0),
+        extra: String = "",
+    ) = resolve("""{"hour":$hour,"minute":$minute$extra}""", now).announcement
 
     @Test
     fun spokenTimeUsesTwelveHoursWithAmPm() {
@@ -80,8 +90,12 @@ class AlarmTest {
     @Test
     fun rejectsOutOfRangeAndMissingTimes() {
         for (json in listOf(
-            """{"minute":0}""", """{"hour":7}""", """{"hour":24,"minute":0}""", """{"hour":-1,"minute":0}""",
-            """{"hour":7,"minute":60}""", """{"hour":7,"minute":-1}""",
+            """{"minute":0}""",
+            """{"hour":7}""",
+            """{"hour":24,"minute":0}""",
+            """{"hour":-1,"minute":0}""",
+            """{"hour":7,"minute":60}""",
+            """{"hour":7,"minute":-1}""",
         )) {
             assertThrows(json, IllegalArgumentException::class.java) { resolve(json) }
         }

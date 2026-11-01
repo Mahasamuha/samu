@@ -3,17 +3,20 @@ package com.mahasamuha.assistant.voice
 import com.mahasamuha.assistant.capabilities.Capability
 import com.mahasamuha.assistant.capabilities.Load
 import com.mahasamuha.assistant.skills.Skill
-import java.time.ZoneId
-import java.time.ZonedDateTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.ZoneId
+import java.time.ZonedDateTime
 
 class VoicePromptTest {
     private val now = ZonedDateTime.of(2026, 10, 24, 15, 5, 0, 0, ZoneId.of("UTC"))
 
-    private fun lazy(id: String, description: String = "$id description") = Capability(id, id, description, Load.LAZY, emptyList())
+    private fun lazy(
+        id: String,
+        description: String = "$id description",
+    ) = Capability(id, id, description, Load.LAZY, emptyList())
 
     private fun prompt(
         skills: List<Skill> = emptyList(),
@@ -45,7 +48,8 @@ class VoicePromptTest {
 
     @Test
     fun eagerSkillsAreSortedByNameAndRenderedAsSections() {
-        val text = prompt(skills = listOf(Skill("zeta", "z desc", instructions = "Z body"), Skill("alpha", "a desc", instructions = "A body")))
+        val text =
+            prompt(skills = listOf(Skill("zeta", "z desc", instructions = "Z body"), Skill("alpha", "a desc", instructions = "A body")))
         assertTrue(text.contains("# Skills"))
         assertTrue(text.indexOf("## Skill: alpha") in 0 until text.indexOf("## Skill: zeta"))
         assertTrue(text.contains("## Skill: alpha\na desc\n\nA body"))
@@ -92,8 +96,16 @@ class VoicePromptTest {
 
     @Test
     fun theSamePieceInADifferentOrderGivesTheSamePrompt() {
-        val a = prompt(capabilities = listOf(lazy("a"), lazy("b")), skills = listOf(Skill("x", "", instructions = ""), Skill("y", "", instructions = "")))
-        val b = prompt(capabilities = listOf(lazy("b"), lazy("a")), skills = listOf(Skill("y", "", instructions = ""), Skill("x", "", instructions = "")))
+        val a =
+            prompt(
+                capabilities = listOf(lazy("a"), lazy("b")),
+                skills = listOf(Skill("x", "", instructions = ""), Skill("y", "", instructions = "")),
+            )
+        val b =
+            prompt(
+                capabilities = listOf(lazy("b"), lazy("a")),
+                skills = listOf(Skill("y", "", instructions = ""), Skill("x", "", instructions = "")),
+            )
         assertEquals(a, b)
     }
 }

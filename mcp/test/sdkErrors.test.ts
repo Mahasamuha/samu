@@ -12,9 +12,13 @@ const INVALID_PARAMS_PREFIX = "MCP error -32602:";
 
 async function connect(): Promise<Client> {
   const server = new McpServer({ name: "test", version: "0" });
-  server.registerTool("echo", { inputSchema: { text: z.string() } }, async ({ text }) => ({
-    content: [{ type: "text", text }],
-  }));
+  server.registerTool(
+    "echo",
+    { inputSchema: { text: z.string() } },
+    async ({ text }) => ({
+      content: [{ type: "text", text }],
+    }),
+  );
   server.registerTool("boom", {}, async () => {
     throw new Error("upstream failed");
   });
@@ -35,19 +39,28 @@ test("unknown tool is isError with the invalid-params prefix", async () => {
   const client = await connect();
   const result = await client.callTool({ name: "nope", arguments: {} });
   assert.equal(result.isError, true);
-  assert.ok(firstText(result).startsWith(INVALID_PARAMS_PREFIX), firstText(result));
+  assert.ok(
+    firstText(result).startsWith(INVALID_PARAMS_PREFIX),
+    firstText(result),
+  );
 });
 
 test("missing required argument is isError with the invalid-params prefix", async () => {
   const client = await connect();
   const result = await client.callTool({ name: "echo", arguments: {} });
   assert.equal(result.isError, true);
-  assert.ok(firstText(result).startsWith(INVALID_PARAMS_PREFIX), firstText(result));
+  assert.ok(
+    firstText(result).startsWith(INVALID_PARAMS_PREFIX),
+    firstText(result),
+  );
 });
 
 test("a handler that throws is isError without the prefix", async () => {
   const client = await connect();
   const result = await client.callTool({ name: "boom", arguments: {} });
   assert.equal(result.isError, true);
-  assert.ok(!firstText(result).startsWith(INVALID_PARAMS_PREFIX), firstText(result));
+  assert.ok(
+    !firstText(result).startsWith(INVALID_PARAMS_PREFIX),
+    firstText(result),
+  );
 });

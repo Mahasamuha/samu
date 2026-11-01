@@ -11,22 +11,29 @@ import org.json.JSONObject
  * Local and read-only, and not open-world: binding reads nothing from outside, so it must not turn
  * announced actions into asked ones. Nothing is fetched; the definitions are already on the phone.
  */
-class UseCapabilityTool(private val catalog: SessionCatalog) : ReadOnlyTool {
-    override val definition = ToolDefinition(
-        name = NAME,
-        description = "Make a capability listed under Capabilities available. Its tools can be called from the next step.",
-        inputSchema = JSONObject()
-            .put("type", "object")
-            .put("properties", JSONObject()
-                .put("id", JSONObject().put("type", "string").put("description", "The capability id, as listed.")))
-            .put("required", JSONArray().put("id")),
-        annotations = ToolAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false),
-    )
+class UseCapabilityTool(
+    private val catalog: SessionCatalog,
+) : ReadOnlyTool {
+    override val definition =
+        ToolDefinition(
+            name = NAME,
+            description = "Make a capability listed under Capabilities available. Its tools can be called from the next step.",
+            inputSchema =
+                JSONObject()
+                    .put("type", "object")
+                    .put(
+                        "properties",
+                        JSONObject()
+                            .put("id", JSONObject().put("type", "string").put("description", "The capability id, as listed.")),
+                    ).put("required", JSONArray().put("id")),
+            annotations = ToolAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false),
+        )
 
     override suspend fun run(arguments: JSONObject): String {
         val id = arguments.optString("id").trim()
-        val result = catalog.bind(id)
-            ?: throw IllegalArgumentException("Unknown capability \"$id\". Available: ${catalog.bindableIds.joinToString()}")
+        val result =
+            catalog.bind(id)
+                ?: throw IllegalArgumentException("Unknown capability \"$id\". Available: ${catalog.bindableIds.joinToString()}")
         return JSONObject()
             .put("capability", result.capability)
             .put("tools", JSONArray(result.toolNames))

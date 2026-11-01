@@ -22,7 +22,10 @@ test("defaults apply when only the required key is set", () => {
 
 test("BRAVE_API_KEY is required", () => {
   assert.throws(() => loadConfig({}), ConfigError);
-  assert.throws(() => loadConfig({ BRAVE_API_KEY: "" }), /BRAVE_API_KEY is required/);
+  assert.throws(
+    () => loadConfig({ BRAVE_API_KEY: "" }),
+    /BRAVE_API_KEY is required/,
+  );
 });
 
 test("optional values are read, and empty strings count as unset", () => {
@@ -45,7 +48,13 @@ test("optional values are read, and empty strings count as unset", () => {
   assert.equal(c.plexTlsName, "name.example.invalid");
   assert.equal(c.plexMusicSection, "Tunes");
 
-  const empty = loadConfig({ ...minimal, PIRATE_WEATHER_API_KEY: "", PLEX_URL: "", PORT: "", WEATHER_UNITS: "" });
+  const empty = loadConfig({
+    ...minimal,
+    PIRATE_WEATHER_API_KEY: "",
+    PLEX_URL: "",
+    PORT: "",
+    WEATHER_UNITS: "",
+  });
   assert.equal(empty.pirateWeatherApiKey, undefined);
   assert.equal(empty.plexUrl, undefined);
   assert.equal(empty.port, 8080);
@@ -53,14 +62,28 @@ test("optional values are read, and empty strings count as unset", () => {
 });
 
 test("WEATHER_UNITS accepts us, si, ca, uk only", () => {
-  for (const u of ["us", "si", "ca", "uk"]) assert.equal(loadConfig({ ...minimal, WEATHER_UNITS: u }).weatherUnits, u);
-  assert.throws(() => loadConfig({ ...minimal, WEATHER_UNITS: "metric" }), /WEATHER_UNITS must be us, si, ca or uk/);
+  for (const u of ["us", "si", "ca", "uk"])
+    assert.equal(loadConfig({ ...minimal, WEATHER_UNITS: u }).weatherUnits, u);
+  assert.throws(
+    () => loadConfig({ ...minimal, WEATHER_UNITS: "metric" }),
+    /WEATHER_UNITS must be us, si, ca or uk/,
+  );
 });
 
 test("integer settings must be non-negative integers", () => {
-  assert.equal(loadConfig({ ...minimal, SEARCH_MAX_PAGES: "0" }).searchMaxPages, 0);
+  assert.equal(
+    loadConfig({ ...minimal, SEARCH_MAX_PAGES: "0" }).searchMaxPages,
+    0,
+  );
   for (const bad of ["-1", "1.5", "abc"]) {
-    assert.throws(() => loadConfig({ ...minimal, PORT: bad }), /PORT must be a non-negative integer/, bad);
+    assert.throws(
+      () => loadConfig({ ...minimal, PORT: bad }),
+      /PORT must be a non-negative integer/,
+      bad,
+    );
   }
-  assert.throws(() => loadConfig({ ...minimal, MAX_BODY_BYTES: "1e400" }), ConfigError);
+  assert.throws(
+    () => loadConfig({ ...minimal, MAX_BODY_BYTES: "1e400" }),
+    ConfigError,
+  );
 });

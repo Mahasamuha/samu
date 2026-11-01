@@ -22,34 +22,49 @@ class MusicControlTool(
     private val closePanel: () -> Unit,
     private val keepPaused: () -> Unit,
 ) : ActionTool {
-
-    override val definition = ToolDefinition(
-        name = "music_control",
-        description = "Control music playback: play, pause, skip, volume, or move it to another speaker. The phone reports it.",
-        inputSchema = JSONObject()
-            .put("type", "object")
-            .put("properties", JSONObject()
-                .put("action", JSONObject()
-                    .put("type", "string")
-                    .put("enum", JSONArray(ACTIONS))
-                    .put("description", "What to do."))
-                .put("volume", JSONObject()
-                    .put("type", "integer")
-                    .put("minimum", 0)
-                    .put("maximum", 100)
-                    .put("description", "Percent, for set_volume."))
-                .put("steps", JSONObject()
-                    .put("type", "integer")
-                    .put("minimum", 1)
-                    .put("maximum", 10)
-                    .put("description", "For volume_up / volume_down: how many steps, when the user says a number (\"up by 3\"). Omit otherwise."))
-                .put("speaker", JSONObject()
-                    .put("type", "string")
-                    .put("description", "For move_to_speaker: the speaker or room the user named, or \"phone\".")))
-            .put("required", JSONArray().put("action"))
-            .put("additionalProperties", false),
-        annotations = ToolAnnotations(title = "Music control", readOnlyHint = false, destructiveHint = false, openWorldHint = false),
-    )
+    override val definition =
+        ToolDefinition(
+            name = "music_control",
+            description = "Control music playback: play, pause, skip, volume, or move it to another speaker. The phone reports it.",
+            inputSchema =
+                JSONObject()
+                    .put("type", "object")
+                    .put(
+                        "properties",
+                        JSONObject()
+                            .put(
+                                "action",
+                                JSONObject()
+                                    .put("type", "string")
+                                    .put("enum", JSONArray(ACTIONS))
+                                    .put("description", "What to do."),
+                            ).put(
+                                "volume",
+                                JSONObject()
+                                    .put("type", "integer")
+                                    .put("minimum", 0)
+                                    .put("maximum", 100)
+                                    .put("description", "Percent, for set_volume."),
+                            ).put(
+                                "steps",
+                                JSONObject()
+                                    .put("type", "integer")
+                                    .put("minimum", 1)
+                                    .put("maximum", 10)
+                                    .put(
+                                        "description",
+                                        "For volume_up / volume_down: how many steps, when the user says a number (\"up by 3\"). Omit otherwise.",
+                                    ),
+                            ).put(
+                                "speaker",
+                                JSONObject()
+                                    .put("type", "string")
+                                    .put("description", "For move_to_speaker: the speaker or room the user named, or \"phone\"."),
+                            ),
+                    ).put("required", JSONArray().put("action"))
+                    .put("additionalProperties", false),
+            annotations = ToolAnnotations(title = "Music control", readOnlyHint = false, destructiveHint = false, openWorldHint = false),
+        )
 
     override suspend fun prepare(arguments: JSONObject): PendingAction {
         require(symfonium.installed) { "Symfonium isn't installed" }
@@ -59,7 +74,11 @@ class MusicControlTool(
         val text: String
         val run: suspend () -> Unit
         when (action) {
-            "play" -> { text = "Resuming."; run = { symfonium.command("play") } }
+            "play" -> {
+                text = "Resuming."
+                run = { symfonium.command("play") }
+            }
+
             "pause" -> {
                 text = "Paused."
                 run = {
@@ -69,8 +88,17 @@ class MusicControlTool(
                     symfonium.command("pause")
                 }
             }
-            "next" -> { text = "Next track."; run = { symfonium.command("next") } }
-            "previous" -> { text = "Previous track."; run = { symfonium.command("previous") } }
+
+            "next" -> {
+                text = "Next track."
+                run = { symfonium.command("next") }
+            }
+
+            "previous" -> {
+                text = "Previous track."
+                run = { symfonium.command("previous") }
+            }
+
             "set_volume" -> {
                 require(arguments.has("volume")) { "volume (0 to 100) is required for set_volume" }
                 val level = arguments.optInt("volume", -1)
@@ -78,8 +106,17 @@ class MusicControlTool(
                 text = "Volume $level."
                 run = { symfonium.command("volume", level) }
             }
-            "volume_up" -> { text = "Turning it up."; run = { adjustVolume(AudioManager.ADJUST_RAISE, steps(arguments)) } }
-            "volume_down" -> { text = "Turning it down."; run = { adjustVolume(AudioManager.ADJUST_LOWER, steps(arguments)) } }
+
+            "volume_up" -> {
+                text = "Turning it up."
+                run = { adjustVolume(AudioManager.ADJUST_RAISE, steps(arguments)) }
+            }
+
+            "volume_down" -> {
+                text = "Turning it down."
+                run = { adjustVolume(AudioManager.ADJUST_LOWER, steps(arguments)) }
+            }
+
             else -> {
                 val renderer = resolveRenderer(arguments.optString("speaker"), speakers)
                 require(renderer != null) { "speaker is required for move_to_speaker" }
@@ -108,7 +145,10 @@ class MusicControlTool(
         return steps
     }
 
-    private fun adjustVolume(direction: Int, steps: Int) {
+    private fun adjustVolume(
+        direction: Int,
+        steps: Int,
+    ) {
         val audio = context.getSystemService(AudioManager::class.java)
         repeat(steps) { audio.adjustSuggestedStreamVolume(direction, AudioManager.USE_DEFAULT_STREAM_TYPE, 0) }
     }

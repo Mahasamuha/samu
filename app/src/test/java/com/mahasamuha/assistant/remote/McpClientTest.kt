@@ -15,7 +15,11 @@ class McpClientTest {
 
     @Test
     fun joinsTheTextContentOfASuccessfulResult() {
-        val text = toolResultText("t", result("""{"content":[{"type":"text","text":"one"},{"type":"image","data":"x"},{"type":"text","text":"two"}]}"""))
+        val text =
+            toolResultText(
+                "t",
+                result("""{"content":[{"type":"text","text":"one"},{"type":"image","data":"x"},{"type":"text","text":"two"}]}"""),
+            )
         assertEquals("one\ntwo", text)
     }
 
@@ -26,26 +30,35 @@ class McpClientTest {
 
     @Test
     fun anSdkInvalidParamsErrorResultMeansTheIndexMayBeStale() {
-        val e = assertThrows(McpStaleToolException::class.java) {
-            toolResultText("t", result("""{"isError":true,"content":[{"type":"text","text":"MCP error -32602: Tool nope not found"}]}"""))
-        }
+        val e =
+            assertThrows(McpStaleToolException::class.java) {
+                toolResultText(
+                    "t",
+                    result("""{"isError":true,"content":[{"type":"text","text":"MCP error -32602: Tool nope not found"}]}"""),
+                )
+            }
         assertEquals("MCP error -32602: Tool nope not found", e.message)
     }
 
     @Test
     fun aToolsOwnFailureIsAPlainMcpExceptionNotStale() {
-        val e = assertThrows(McpException::class.java) {
-            toolResultText("t", result("""{"isError":true,"content":[{"type":"text","text":"Brave returned 429"}]}"""))
-        }
+        val e =
+            assertThrows(McpException::class.java) {
+                toolResultText("t", result("""{"isError":true,"content":[{"type":"text","text":"Brave returned 429"}]}"""))
+            }
         assertFalse(e is McpStaleToolException)
         assertEquals("Brave returned 429", e.message)
     }
 
     @Test
     fun theStaleTextMustBeAPrefixNotJustContained() {
-        val e = assertThrows(McpException::class.java) {
-            toolResultText("t", result("""{"isError":true,"content":[{"type":"text","text":"Upstream said: MCP error -32602: bad"}]}"""))
-        }
+        val e =
+            assertThrows(McpException::class.java) {
+                toolResultText(
+                    "t",
+                    result("""{"isError":true,"content":[{"type":"text","text":"Upstream said: MCP error -32602: bad"}]}"""),
+                )
+            }
         assertFalse(e is McpStaleToolException)
     }
 
@@ -70,25 +83,28 @@ class McpClientTest {
 
     @Test
     fun invalidParamsOnAToolCallIsStale() {
-        val e = assertThrows(McpStaleToolException::class.java) {
-            rpcResult("tools/call", JSONObject("""{"error":{"code":-32602,"message":"Unknown tool"}}"""))
-        }
+        val e =
+            assertThrows(McpStaleToolException::class.java) {
+                rpcResult("tools/call", JSONObject("""{"error":{"code":-32602,"message":"Unknown tool"}}"""))
+            }
         assertEquals("MCP tools/call: Unknown tool", e.message)
     }
 
     @Test
     fun invalidParamsOnAnotherMethodIsNotStale() {
-        val e = assertThrows(McpException::class.java) {
-            rpcResult("resources/read", JSONObject("""{"error":{"code":-32602,"message":"Unknown resource"}}"""))
-        }
+        val e =
+            assertThrows(McpException::class.java) {
+                rpcResult("resources/read", JSONObject("""{"error":{"code":-32602,"message":"Unknown resource"}}"""))
+            }
         assertFalse(e is McpStaleToolException)
     }
 
     @Test
     fun otherRpcErrorsOnAToolCallAreNotStale() {
-        val e = assertThrows(McpException::class.java) {
-            rpcResult("tools/call", JSONObject("""{"error":{"code":-32603,"message":"Internal"}}"""))
-        }
+        val e =
+            assertThrows(McpException::class.java) {
+                rpcResult("tools/call", JSONObject("""{"error":{"code":-32603,"message":"Internal"}}"""))
+            }
         assertFalse(e is McpStaleToolException)
         assertEquals("MCP tools/call: Internal", e.message)
     }
@@ -123,12 +139,13 @@ class McpClientTest {
 
     @Test
     fun readsAnnotationsDescriptionAndSchema() {
-        val tool = toolDefinition(
-            JSONObject(
-                """{"name":"web_search","description":"Search","inputSchema":{"type":"object","properties":{"q":{"type":"string"}}},
+        val tool =
+            toolDefinition(
+                JSONObject(
+                    """{"name":"web_search","description":"Search","inputSchema":{"type":"object","properties":{"q":{"type":"string"}}},
                    "annotations":{"title":"Web search","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}}""",
-            ),
-        )
+                ),
+            )
         assertEquals("Search", tool.description)
         assertTrue(tool.inputSchema.getJSONObject("properties").has("q"))
         assertEquals("Web search", tool.annotations.title)
@@ -141,7 +158,10 @@ class McpClientTest {
     @Test
     fun theTitleFallsBackToTheToolsOwnTitle() {
         assertEquals("Top level", toolDefinition(JSONObject("""{"name":"t","title":"Top level"}""")).annotations.title)
-        assertEquals("Annotated", toolDefinition(JSONObject("""{"name":"t","title":"Top level","annotations":{"title":"Annotated"}}""")).annotations.title)
+        assertEquals(
+            "Annotated",
+            toolDefinition(JSONObject("""{"name":"t","title":"Top level","annotations":{"title":"Annotated"}}""")).annotations.title,
+        )
     }
 
     @Test

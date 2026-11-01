@@ -6,7 +6,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ContactDirectoryTest {
-    private fun plain(number: String, minDigits: Int = 2) = ContactDirectory.isPhoneNumber(number, minDigits)
+    private fun plain(
+        number: String,
+        minDigits: Int = 2,
+    ) = ContactDirectory.isPhoneNumber(number, minDigits)
 
     @Test
     fun acceptsDigitsPlusAndCommonSeparators() {

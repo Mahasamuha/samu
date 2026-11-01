@@ -54,7 +54,13 @@ class TimerTest {
 
     @Test
     fun rejectsMissingZeroNegativeAndOverlongDurations() {
-        for (json in listOf("{}", """{"duration_seconds":0}""", """{"duration_seconds":-5}""", """{"duration_seconds":86401}""", """{"duration_seconds":"soon"}""")) {
+        for (json in listOf(
+            "{}",
+            """{"duration_seconds":0}""",
+            """{"duration_seconds":-5}""",
+            """{"duration_seconds":86401}""",
+            """{"duration_seconds":"soon"}""",
+        )) {
             val e = assertThrows(IllegalArgumentException::class.java) { resolve(json) }
             assertTrue(e.message!!.startsWith("duration_seconds must be between 1 and 86400"))
         }

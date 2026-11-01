@@ -18,8 +18,12 @@ class ToolRegistryTest {
     private val announce = Confirmation.Announce("Calling Mom, mobile.", "Call Mom, mobile?")
     private val confirmer = RecordingConfirmer()
 
-    private fun execute(registry: ToolRegistry, name: String, arguments: String = "{}", with: Confirmer = confirmer) =
-        runBlocking { registry.execute(call(name, arguments), with) }
+    private fun execute(
+        registry: ToolRegistry,
+        name: String,
+        arguments: String = "{}",
+        with: Confirmer = confirmer,
+    ) = runBlocking { registry.execute(call(name, arguments), with) }
 
     // --- confirmation policy
 
@@ -73,10 +77,13 @@ class ToolRegistryTest {
 
     @Test
     fun anOpenWorldToolThatFailsStillCountsAsHavingReadOutsideContent() {
-        val registry = ToolRegistry(listOf(
-            FakeReadOnlyTool("web_search", openWorld = true, failWith = RuntimeException("boom")),
-            FakeActionTool("place_call", announce),
-        ))
+        val registry =
+            ToolRegistry(
+                listOf(
+                    FakeReadOnlyTool("web_search", openWorld = true, failWith = RuntimeException("boom")),
+                    FakeActionTool("place_call", announce),
+                ),
+            )
         execute(registry, "web_search")
         execute(registry, "place_call")
         assertTrue(confirmer.asked.single() is Confirmation.Ask)
@@ -115,7 +122,8 @@ class ToolRegistryTest {
     @Test
     fun declinedReturnsNotConfirmedWithTheUsersWordsAndAScopeNote() {
         val registry = ToolRegistry(listOf(FakeActionTool("send_sms", Confirmation.Ask("Send?"))))
-        val result = JSONObject(execute(registry, "send_sms", with = RecordingConfirmer(ConfirmationResult.Declined("yes but say ten minutes"))))
+        val result =
+            JSONObject(execute(registry, "send_sms", with = RecordingConfirmer(ConfirmationResult.Declined("yes but say ten minutes"))))
 
         assertEquals("not_confirmed", result.getString("status"))
         assertEquals("yes but say ten minutes", result.getString("user_said"))
@@ -208,14 +216,18 @@ class ToolRegistryTest {
 
     @Test
     fun readOnlyHintMustMatchTheToolKind() {
-        val readOnlyWithoutHint = object : ReadOnlyTool {
-            override val definition = definition("liar", readOnly = false)
-            override suspend fun run(arguments: JSONObject) = "x"
-        }
-        val actionWithHint = object : ActionTool {
-            override val definition = definition("sneaky", readOnly = true)
-            override suspend fun prepare(arguments: JSONObject) = PendingAction(Confirmation.Report("x")) { "x" }
-        }
+        val readOnlyWithoutHint =
+            object : ReadOnlyTool {
+                override val definition = definition("liar", readOnly = false)
+
+                override suspend fun run(arguments: JSONObject) = "x"
+            }
+        val actionWithHint =
+            object : ActionTool {
+                override val definition = definition("sneaky", readOnly = true)
+
+                override suspend fun prepare(arguments: JSONObject) = PendingAction(Confirmation.Report("x")) { "x" }
+            }
         assertThrows(IllegalArgumentException::class.java) { ToolRegistry(listOf(readOnlyWithoutHint)) }
         assertThrows(IllegalArgumentException::class.java) { ToolRegistry().bind(listOf(actionWithHint)) }
     }
@@ -226,5 +238,4 @@ class ToolRegistryTest {
         registry.bind(listOf(FakeReadOnlyTool("a")))
         assertEquals(listOf("b", "a"), registry.definitions.map { it.name })
     }
-
 }

@@ -40,26 +40,44 @@ export interface CapabilityCatalog {
  * file is mcp/dist/capabilities.js, so the repo root is two directories up from it).
  * Throws on an invalid manifest so a bad deploy fails at startup.
  */
-export function loadCatalog(env: NodeJS.ProcessEnv = process.env): CapabilityCatalog {
+export function loadCatalog(
+  env: NodeJS.ProcessEnv = process.env,
+): CapabilityCatalog {
   const root = new URL("../../", import.meta.url).pathname;
-  const manifestPath = env.CAPABILITIES_FILE || defaultPath(root, "capabilities/capabilities.json");
+  const manifestPath =
+    env.CAPABILITIES_FILE ||
+    defaultPath(root, "capabilities/capabilities.json");
   const skillsDir = env.SKILLS_DIR || defaultPath(root, "skills");
 
-  const parsed = manifestSchema.safeParse(JSON.parse(readFileSync(manifestPath, "utf8")));
-  if (!parsed.success) throw new Error(`Invalid capability manifest ${manifestPath}: ${z.prettifyError(parsed.error)}`);
+  const parsed = manifestSchema.safeParse(
+    JSON.parse(readFileSync(manifestPath, "utf8")),
+  );
+  if (!parsed.success)
+    throw new Error(
+      `Invalid capability manifest ${manifestPath}: ${z.prettifyError(parsed.error)}`,
+    );
   const ids = parsed.data.capabilities.map((c) => c.id);
-  if (new Set(ids).size !== ids.length) throw new Error(`Invalid capability manifest ${manifestPath}: duplicate id`);
+  if (new Set(ids).size !== ids.length)
+    throw new Error(
+      `Invalid capability manifest ${manifestPath}: duplicate id`,
+    );
 
   // Tier is derived: all local means the APK alone owns it, so the server never sees it.
-  const capabilities = parsed.data.capabilities.filter((c) => !c.tools.every((t) => t.where === "local"));
+  const capabilities = parsed.data.capabilities.filter(
+    (c) => !c.tools.every((t) => t.where === "local"),
+  );
   const served = new Set(capabilities.map((c) => c.id));
-  const skills = loadServerSkills(skillsDir).filter((s) => s.capabilities.some((id) => served.has(id)));
+  const skills = loadServerSkills(skillsDir).filter((s) =>
+    s.capabilities.some((id) => served.has(id)),
+  );
   return { capabilities, skills };
 }
 
 /** /app/<rel> inside the image (the build stage's layout), else the repo checkout. */
 function defaultPath(repoRoot: string, rel: string): string {
-  return existsSync(join("/app", rel)) ? join("/app", rel) : join(repoRoot, rel);
+  return existsSync(join("/app", rel))
+    ? join("/app", rel)
+    : join(repoRoot, rel);
 }
 
 function loadServerSkills(dir: string): ServerSkill[] {
@@ -86,7 +104,8 @@ function parseSkill(text: string, file: string): ServerSkill | undefined {
   if (fields.get("delivery") !== "server") return undefined;
   const name = fields.get("name");
   const description = fields.get("description");
-  if (!name || !description) throw new Error(`${file}: name and description are required`);
+  if (!name || !description)
+    throw new Error(`${file}: name and description are required`);
   return {
     name,
     description,
@@ -97,7 +116,10 @@ function parseSkill(text: string, file: string): ServerSkill | undefined {
 
 function list(value: string | undefined): string[] {
   const inner = /^\[(.*)\]$/.exec(value ?? "")?.[1] ?? "";
-  return inner.split(",").map((s) => s.trim()).filter(Boolean);
+  return inner
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 interface ToolDefinition {
@@ -111,24 +133,50 @@ interface ToolDefinition {
  * zod-to-JSON-Schema path to keep in sync. The handler map is not public API; the lookup fails loudly if
  * a future SDK moves it.
  */
-async function registeredToolDefinitions(server: McpServer): Promise<ToolDefinition[]> {
-  const handlers = (server.server as unknown as { _requestHandlers?: Map<string, (request: unknown, extra: unknown) => unknown> })._requestHandlers;
+async function registeredToolDefinitions(
+  server: McpServer,
+): Promise<ToolDefinition[]> {
+  const handlers = (
+    server.server as unknown as {
+      _requestHandlers?: Map<
+        string,
+        (request: unknown, extra: unknown) => unknown
+      >;
+    }
+  )._requestHandlers;
   const listTools = handlers?.get("tools/list");
-  if (!listTools) throw new Error("MCP SDK changed: no tools/list handler to derive capability tool definitions from");
-  const result = (await listTools({ method: "tools/list" }, {})) as { tools: ToolDefinition[] };
+  if (!listTools)
+    throw new Error(
+      "MCP SDK changed: no tools/list handler to derive capability tool definitions from",
+    );
+  const result = (await listTools({ method: "tools/list" }, {})) as {
+    tools: ToolDefinition[];
+  };
   return result.tools;
 }
 
 /** The capability://index document for the tools registered on `server`. Call after registering them. */
-export async function buildIndex(catalog: CapabilityCatalog, server: McpServer): Promise<unknown> {
-  const registered = new Map((await registeredToolDefinitions(server)).map((t) => [t.name, t]));
+export async function buildIndex(
+  catalog: CapabilityCatalog,
+  server: McpServer,
+): Promise<unknown> {
+  const registered = new Map(
+    (await registeredToolDefinitions(server)).map((t) => [t.name, t]),
+  );
   // Local tools are the phone's concern. Everything else the capability needs (required ones) must be registered here.
   const capabilities = catalog.capabilities.filter((c) =>
-    c.tools.every((t) => t.where === "local" || t.required === false || registered.has(t.name)),
+    c.tools.every(
+      (t) =>
+        t.where === "local" || t.required === false || registered.has(t.name),
+    ),
   );
   const included = new Set(capabilities.map((c) => c.id));
 
-  const toolNames = new Set(capabilities.flatMap((c) => c.tools.filter((t) => t.where !== "local").map((t) => t.name)));
+  const toolNames = new Set(
+    capabilities.flatMap((c) =>
+      c.tools.filter((t) => t.where !== "local").map((t) => t.name),
+    ),
+  );
   const tools = [...toolNames].sort().flatMap((name) => {
     const t = registered.get(name);
     if (!t) return [];
@@ -136,6 +184,8 @@ export async function buildIndex(catalog: CapabilityCatalog, server: McpServer):
     return [{ name, title, description, inputSchema, annotations }];
   });
 
-  const skills = catalog.skills.filter((s) => s.capabilities.some((id) => included.has(id)));
+  const skills = catalog.skills.filter((s) =>
+    s.capabilities.some((id) => included.has(id)),
+  );
   return { version: 1, capabilities, tools, skills };
 }

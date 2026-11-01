@@ -28,7 +28,11 @@ object IndexLimits {
     const val MAX_SKILL_INSTRUCTIONS = 8 * 1024
 
     /** Throws [IllegalArgumentException] naming [field] when [value] is longer than [max]. */
-    fun checkLength(field: String, value: String, max: Int) {
+    fun checkLength(
+        field: String,
+        value: String,
+        max: Int,
+    ) {
         require(value.length <= max) { "$field is ${value.length} characters (limit $max)" }
     }
 }
@@ -38,7 +42,12 @@ object IndexLimits {
  * limit ([JSONException], [IllegalArgumentException]) is skipped and logged with its id or name; the rest
  * are kept. Entries past [max] are dropped, logged once.
  */
-fun <T> parseEntries(array: JSONArray, what: String, max: Int, parse: (JSONObject) -> T): List<T> {
+fun <T> parseEntries(
+    array: JSONArray,
+    what: String,
+    max: Int,
+    parse: (JSONObject) -> T,
+): List<T> {
     if (array.length() > max) Log.w(TAG, "Index has ${array.length()} $what; keeping the first $max")
     return (0 until minOf(array.length(), max)).mapNotNull { i ->
         try {
@@ -53,7 +62,10 @@ fun <T> parseEntries(array: JSONArray, what: String, max: Int, parse: (JSONObjec
     }
 }
 
-private fun entryLabel(array: JSONArray, i: Int): String {
+private fun entryLabel(
+    array: JSONArray,
+    i: Int,
+): String {
     val entry = array.optJSONObject(i) ?: return "#$i"
     return entry.optString("id").ifEmpty { entry.optString("name") }.ifEmpty { "#$i" }
 }

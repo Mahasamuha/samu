@@ -2,8 +2,6 @@ package com.mahasamuha.assistant.weather
 
 import com.mahasamuha.assistant.voice.ApproximateLocation
 import com.mahasamuha.assistant.voice.LocationSource
-import java.time.LocalDate
-import java.util.Locale
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.After
@@ -13,6 +11,8 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.time.LocalDate
+import java.util.Locale
 
 class WeatherToolTest {
     private val savedLocale = Locale.getDefault()
@@ -26,21 +26,30 @@ class WeatherToolTest {
     private val today = LocalDate.now()
 
     /** A forecast for [days] days from today, 10:00 now, with a reading for every hour of every day. */
-    private class FakeForecast(private val today: LocalDate) {
+    private class FakeForecast(
+        private val today: LocalDate,
+    ) {
         var requestedDays = 0
         var requestedUnits: Units? = null
         var requestedAt: Pair<Double, Double>? = null
 
-        suspend fun forecast(latitude: Double, longitude: Double, units: Units, days: Int): Forecast {
+        suspend fun forecast(
+            latitude: Double,
+            longitude: Double,
+            units: Units,
+            days: Int,
+        ): Forecast {
             requestedDays = days
             requestedUnits = units
             requestedAt = latitude to longitude
             // Like the real service, the forecast stops at its furthest day.
             val count = minOf(days, OpenMeteoWeather.MAX_DAYS)
             val now = today.atTime(10, 0)
-            val hours = (0 until count * 24).map { now.toLocalDate().atStartOfDay().plusHours(it.toLong()) }
-                .filter { it.isAfter(now) }
-                .map { Forecast.Hour(it, 50.0 + it.hour, "clear", if (it.hour == 12) 40 else null) }
+            val hours =
+                (0 until count * 24)
+                    .map { now.toLocalDate().atStartOfDay().plusHours(it.toLong()) }
+                    .filter { it.isAfter(now) }
+                    .map { Forecast.Hour(it, 50.0 + it.hour, "clear", if (it.hour == 12) 40 else null) }
             return Forecast(
                 units = units,
                 now = now,
@@ -62,8 +71,10 @@ class WeatherToolTest {
 
     private val forecast = FakeForecast(today)
 
-    private fun run(arguments: String = "{}", locations: LocationSource = FakeLocations()): JSONObject =
-        JSONObject(runBlocking { WeatherTool(forecast::forecast, locations).run(JSONObject(arguments)) })
+    private fun run(
+        arguments: String = "{}",
+        locations: LocationSource = FakeLocations(),
+    ): JSONObject = JSONObject(runBlocking { WeatherTool(forecast::forecast, locations).run(JSONObject(arguments)) })
 
     @Test
     fun noDayGivesCurrentConditionsTodayAndTheRestOfTheNight() {
@@ -86,7 +97,15 @@ class WeatherToolTest {
         val dayName = today.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, Locale.US)
         val tomorrowName = today.plusDays(1).dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, Locale.US)
         assertEquals(
-            listOf("$dayName 12 PM", "$dayName 3 PM", "$dayName 6 PM", "$dayName 9 PM", "$tomorrowName 12 AM", "$tomorrowName 3 AM", "$tomorrowName 6 AM"),
+            listOf(
+                "$dayName 12 PM",
+                "$dayName 3 PM",
+                "$dayName 6 PM",
+                "$dayName 9 PM",
+                "$tomorrowName 12 AM",
+                "$tomorrowName 3 AM",
+                "$tomorrowName 6 AM",
+            ),
             times,
         )
     }
@@ -202,5 +221,4 @@ class WeatherToolTest {
         assertTrue(tool.allowRemote)
         assertEquals("get_weather", tool.definition.name)
     }
-
 }

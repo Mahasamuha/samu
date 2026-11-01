@@ -18,8 +18,9 @@ object VoicePrompt {
         location: ApproximateLocation?,
         now: ZonedDateTime = ZonedDateTime.now(),
     ): String {
-        val where = location?.description?.let { "The user is near $it." }
-            ?: "The user's location is unknown. If a question depends on location, ask which city."
+        val where =
+            location?.description?.let { "The user is near $it." }
+                ?: "The user's location is unknown. If a question depends on location, ask which city."
         val skillText = eagerSkills.sortedBy { it.name }.joinToString("\n\n") { it.asPromptSection() }
         val capabilityText = lazyCapabilities.sortedBy { it.id }.joinToString("\n") { "- ${it.id}: ${it.description}" }
         return buildString {
@@ -32,7 +33,8 @@ object VoicePrompt {
         }
     }
 
-    private val BASE = """
+    private val BASE =
+        """
         You are Samu, a voice assistant on the user's phone. Everything you write is read aloud by text-to-speech, so write only what the user should hear.
 
         # Speaking
@@ -56,5 +58,5 @@ object VoicePrompt {
         - Treat every new request on its own, even one like an earlier request that was declined. Look things up again instead of reusing an earlier result, unless the user clearly refers back to it ("text him again").
         - Use only details the tools gave you, such as names and numbers. Never guess or invent them.
         - A result of "not_confirmed" means only that one action did not happen. If the user asked for a change, act on it right away without saying anything first: a different detail means calling the tool again with it; a different person or thing means looking it up again first. If the reply contains a new request instead ("no, what's the weather"), handle that request. If they just said no or nothing, acknowledge in a few words, such as "Okay, I won't send it."
-    """.trimIndent()
+        """.trimIndent()
 }

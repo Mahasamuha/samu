@@ -4,7 +4,9 @@ import android.content.Context
 import androidx.core.content.edit
 
 /** The TTS voice picked on the setup screen (plan §5b); null means the engine default. */
-class VoicePreference(context: Context) {
+class VoicePreference(
+    context: Context,
+) {
     private val prefs = context.getSharedPreferences("voice", Context.MODE_PRIVATE)
 
     var name: String?

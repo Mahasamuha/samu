@@ -37,11 +37,19 @@ export async function forward(
     let upstream: Response;
     try {
       const passed = Object.fromEntries(
-        FORWARDED_REQUEST_HEADERS.flatMap((name) => (typeof req.headers[name] === "string" ? [[name, req.headers[name]]] : [])),
+        FORWARDED_REQUEST_HEADERS.flatMap((name) =>
+          typeof req.headers[name] === "string"
+            ? [[name, req.headers[name]]]
+            : [],
+        ),
       );
       upstream = await fetch(upstreamTarget.url, {
         method: "POST",
-        headers: { ...passed, "content-type": "application/json", ...upstreamTarget.headers },
+        headers: {
+          ...passed,
+          "content-type": "application/json",
+          ...upstreamTarget.headers,
+        },
         body,
         signal: abort.signal,
       });
@@ -54,22 +62,32 @@ export async function forward(
     // Upstream auth failures are a server misconfiguration. Passed through, the phone would read them as its own token being rejected.
     if (upstream.status === 401 || upstream.status === 403) {
       // The body says what's misconfigured; any key it echoes is redacted before it reaches the container log.
-      const body = (await upstream.text()).slice(0, 500).replace(/sk-[\w-]+/g, "sk-<redacted>");
-      log("upstream_rejected_gateway", { requestId, status: upstream.status, body });
+      const body = (await upstream.text())
+        .slice(0, 500)
+        .replace(/sk-[\w-]+/g, "sk-<redacted>");
+      log("upstream_rejected_gateway", {
+        requestId,
+        status: upstream.status,
+        body,
+      });
       throw new HttpError(502, "Upstream rejected the request");
     }
 
-    const contentType = upstream.headers.get("content-type") ?? "application/json";
+    const contentType =
+      upstream.headers.get("content-type") ?? "application/json";
     res.writeHead(upstream.status, {
       "content-type": contentType,
       "cache-control": "no-store",
-      ...(contentType.startsWith("text/event-stream") ? { "x-accel-buffering": "no" } : {}),
+      ...(contentType.startsWith("text/event-stream")
+        ? { "x-accel-buffering": "no" }
+        : {}),
     });
 
     try {
       for await (const chunk of upstream.body ?? []) {
         capture?.add(chunk);
-        if (!res.write(chunk)) await once(res, "drain", { signal: abort.signal });
+        if (!res.write(chunk))
+          await once(res, "drain", { signal: abort.signal });
       }
       res.end();
     } catch (e) {

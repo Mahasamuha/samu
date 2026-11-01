@@ -16,16 +16,20 @@ class PlaceCallToolTest {
     private val launched = mutableListOf<android.content.Intent>()
     private var closed = 0
 
-    private fun tool(emergency: (String) -> Boolean = { false }) = PlaceCallTool(
-        contacts = null,
-        launch = { launched += it },
-        closePanel = { closed++ },
-        isEmergencyNumber = emergency,
-        defaultDialerPackage = { "com.example.dialer" },
-        placeCall = { placed += it },
-    )
+    private fun tool(emergency: (String) -> Boolean = { false }) =
+        PlaceCallTool(
+            contacts = null,
+            launch = { launched += it },
+            closePanel = { closed++ },
+            isEmergencyNumber = emergency,
+            defaultDialerPackage = { "com.example.dialer" },
+            placeCall = { placed += it },
+        )
 
-    private fun prepare(tool: PlaceCallTool, arguments: JSONObject) = runBlocking { tool.prepare(arguments) }
+    private fun prepare(
+        tool: PlaceCallTool,
+        arguments: JSONObject,
+    ) = runBlocking { tool.prepare(arguments) }
 
     @Test
     fun withoutContactsANumberIsAskedAboutNeverAnnounced() {
@@ -50,7 +54,14 @@ class PlaceCallToolTest {
     @Test
     fun anEmergencyNumberOpensTheDialerAndIsAnnounced() {
         var checked: String? = null
-        val pending = prepare(tool { checked = it; true }, JSONObject().put("phone_number", "9 1 1"))
+        val pending =
+            prepare(
+                tool {
+                    checked = it
+                    true
+                },
+                JSONObject().put("phone_number", "9 1 1"),
+            )
 
         // The emergency check runs on the digits, so "9 1 1" is not a way around it.
         assertEquals("911", checked)
@@ -72,16 +83,23 @@ class PlaceCallToolTest {
     @Test
     fun theEmergencyCheckKeepsAPlusAndDropsSeparators() {
         var checked: String? = null
-        prepare(tool { checked = it; false }, JSONObject().put("phone_number", "+1 (555) 010-0100"))
+        prepare(
+            tool {
+                checked = it
+                false
+            },
+            JSONObject().put("phone_number", "+1 (555) 010-0100"),
+        )
         assertEquals("+15550100100", checked)
     }
 
     // --- certainty rules
 
-    private val sam = Contact(
-        "Sam Lee",
-        listOf(PhoneNumber("555-0101", "Mobile"), PhoneNumber("555-0102", "Work"), PhoneNumber("555-0103", "Home")),
-    )
+    private val sam =
+        Contact(
+            "Sam Lee",
+            listOf(PhoneNumber("555-0101", "Mobile"), PhoneNumber("555-0102", "Work"), PhoneNumber("555-0103", "Home")),
+        )
 
     private val sameDigits: (String, String) -> Boolean = { a, b -> a.filter(Char::isDigit) == b.filter(Char::isDigit) }
 

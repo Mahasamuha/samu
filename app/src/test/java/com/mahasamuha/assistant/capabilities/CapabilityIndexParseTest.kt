@@ -8,11 +8,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CapabilityIndexParseTest {
-    private val capability = """{"id":"search","title":"Search","description":"d","load":"lazy","tools":[{"name":"web_search","where":"remote"}]}"""
-    private val tool = """{"name":"web_search","description":"Search the web","inputSchema":{"type":"object"},"annotations":{"readOnlyHint":true,"openWorldHint":true}}"""
+    private val capability =
+        """{"id":"search","title":"Search","description":"d","load":"lazy",""" +
+            """"tools":[{"name":"web_search","where":"remote"}]}"""
+    private val tool =
+        """{"name":"web_search","description":"Search the web","inputSchema":{"type":"object"},""" +
+            """"annotations":{"readOnlyHint":true,"openWorldHint":true}}"""
     private val skill = """{"name":"search-tips","description":"s","capabilities":["search"],"instructions":"Be brief."}"""
 
-    private fun parse(text: String, principal: String = "user-1") = parseCapabilityIndex(text, principal, 123L, IndexSource.FRESH)
+    private fun parse(
+        text: String,
+        principal: String = "user-1",
+    ) = parseCapabilityIndex(text, principal, 123L, IndexSource.FRESH)
 
     @Test
     fun parsesAVersionOneIndex() {
@@ -50,11 +57,12 @@ class CapabilityIndexParseTest {
     fun badToolAndSkillEntriesAreSkippedIndividually() {
         val longToolDescription = "x".repeat(IndexLimits.MAX_TOOL_DESCRIPTION + 1)
         val longInstructions = "x".repeat(IndexLimits.MAX_SKILL_INSTRUCTIONS + 1)
-        val index = parse(
-            """{"version":1,"capabilities":[$capability],
+        val index =
+            parse(
+                """{"version":1,"capabilities":[$capability],
               "tools":[$tool,{"description":"no name"},{"name":"long","description":"$longToolDescription"},{"name":"other"}],
               "skills":[$skill,{"description":"no name"},{"name":"big","instructions":"$longInstructions"}]}""",
-        )
+            )
         assertEquals(listOf("web_search", "other"), index.tools.map { it.name })
         assertEquals(listOf("search-tips"), index.skills.map { it.name })
     }

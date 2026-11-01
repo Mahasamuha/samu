@@ -1,8 +1,21 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, test, type TestContext } from "node:test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  test,
+  type TestContext,
+} from "node:test";
 import { BodyLog, DebugSwitch, log } from "../src/logging.js";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -10,7 +23,12 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 /** Collects what `log` writes to console.log, parsed. */
 function captureLogs(t: TestContext): Array<Record<string, unknown>> {
   const lines: Array<Record<string, unknown>> = [];
-  t.mock.method(console, "log", (line: string) => void lines.push(JSON.parse(line) as Record<string, unknown>));
+  t.mock.method(
+    console,
+    "log",
+    (line: string) =>
+      void lines.push(JSON.parse(line) as Record<string, unknown>),
+  );
   return lines;
 }
 
@@ -32,7 +50,10 @@ describe("DebugSwitch", () => {
     assert.equal(debug.on, true);
     debug.toggle();
     assert.equal(debug.on, false);
-    assert.deepEqual(lines.map((l) => l.event), ["debug_on", "debug_off"]);
+    assert.deepEqual(
+      lines.map((l) => l.event),
+      ["debug_on", "debug_off"],
+    );
     assert.equal(lines[1]?.reason, "toggled");
   });
 
@@ -92,15 +113,27 @@ describe("BodyLog", () => {
     const files = await readdir(nested);
     assert.equal(files.length, 1);
     assert.match(files[0]!, /^bodies-\d{4}-\d{2}-\d{2}T\d{2}\.jsonl$/);
-    const lines = (await readFile(path.join(nested, files[0]!), "utf8")).trim().split("\n");
-    assert.deepEqual(lines.map((l) => JSON.parse(l)), [{ n: 1 }, { n: 2 }]);
+    const lines = (await readFile(path.join(nested, files[0]!), "utf8"))
+      .trim()
+      .split("\n");
+    assert.deepEqual(
+      lines.map((l) => JSON.parse(l)),
+      [{ n: 1 }, { n: 2 }],
+    );
 
-    const { mode } = await (await import("node:fs/promises")).stat(path.join(nested, files[0]!));
+    const { mode } = await (
+      await import("node:fs/promises")
+    ).stat(path.join(nested, files[0]!));
     assert.equal(mode & 0o077, 0, "no group/other access");
   });
 
   async function seed(): Promise<void> {
-    for (const [name, age] of [["bodies-old.jsonl", 30], ["bodies-recent.jsonl", 2], ["bodies-fresh.jsonl", 0], ["other.log", 100]] as const) {
+    for (const [name, age] of [
+      ["bodies-old.jsonl", 30],
+      ["bodies-recent.jsonl", 2],
+      ["bodies-fresh.jsonl", 0],
+      ["other.log", 100],
+    ] as const) {
       const file = path.join(dir, name);
       await writeFile(file, "{}\n");
       await utimes(file, hoursAgo(age), hoursAgo(age));
@@ -110,12 +143,20 @@ describe("BodyLog", () => {
   test("init prunes body files older than the retention only", async () => {
     await seed();
     await new BodyLog(dir, 24 * 3_600_000, new DebugSwitch(1000), 1000).init();
-    assert.deepEqual((await readdir(dir)).sort(), ["bodies-fresh.jsonl", "bodies-recent.jsonl", "other.log"]);
+    assert.deepEqual((await readdir(dir)).sort(), [
+      "bodies-fresh.jsonl",
+      "bodies-recent.jsonl",
+      "other.log",
+    ]);
   });
 
   test("with retention 0, files are kept for one debug duration", async () => {
     await seed();
     await new BodyLog(dir, 0, new DebugSwitch(1000), 3 * 3_600_000).init();
-    assert.deepEqual((await readdir(dir)).sort(), ["bodies-fresh.jsonl", "bodies-recent.jsonl", "other.log"]);
+    assert.deepEqual((await readdir(dir)).sort(), [
+      "bodies-fresh.jsonl",
+      "bodies-recent.jsonl",
+      "other.log",
+    ]);
   });
 });

@@ -11,7 +11,10 @@ class MusicTest {
     private val livingRoom = CastSpeaker("Living Room", SpeakerDirectory.UPNP, "uuid-living_MR")
     private val speakers = listOf(office, kitchen, livingRoom)
 
-    private fun match(name: String, list: List<CastSpeaker> = speakers) = SpeakerDirectory.match(name, list)
+    private fun match(
+        name: String,
+        list: List<CastSpeaker> = speakers,
+    ) = SpeakerDirectory.match(name, list)
 
     // --- matching a spoken speaker name
 
@@ -91,7 +94,12 @@ class MusicTest {
     // --- Sonos zone groups
 
     private fun soap(zoneGroupState: String): String {
-        val escaped = zoneGroupState.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+        val escaped =
+            zoneGroupState
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
         return "<s:Envelope><s:Body><u:Resp><ZoneGroupState>$escaped</ZoneGroupState></u:Resp></s:Body></s:Envelope>"
     }
 
@@ -165,7 +173,10 @@ class MusicTest {
 
     // --- raw HTTP
 
-    private fun http(headers: String, body: ByteArray) = "HTTP/1.1 $headers\r\n\r\n".toByteArray(Charsets.ISO_8859_1) + body
+    private fun http(
+        headers: String,
+        body: ByteArray,
+    ) = "HTTP/1.1 $headers\r\n\r\n".toByteArray(Charsets.ISO_8859_1) + body
 
     @Test
     fun readsAPlainBody() {
@@ -188,5 +199,4 @@ class MusicTest {
     fun aResponseWithoutHeadersEndFails() {
         assertThrows(IllegalStateException::class.java) { SpeakerDirectory.httpBody("HTTP/1.1 200 OK".toByteArray()) }
     }
-
 }

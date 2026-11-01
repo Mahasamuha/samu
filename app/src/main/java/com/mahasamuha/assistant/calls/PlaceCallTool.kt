@@ -36,30 +36,43 @@ class PlaceCallTool(
     private val defaultDialerPackage: () -> String?,
     private val placeCall: (String) -> Unit,
 ) : ActionTool {
-
-    override val definition = ToolDefinition(
-        name = "place_call",
-        description = "Place a phone call from the user's phone. The phone announces the call or asks the user first.",
-        inputSchema = JSONObject()
-            .put("type", "object")
-            .put("properties", JSONObject()
-                .put("phone_number", JSONObject()
-                    .put("type", "string")
-                    .put("description", "The number to call, from find_contact or as the user said it."))
-                .put("contact_name", JSONObject()
-                    .put("type", "string")
-                    .put("description", "The contact's full name as find_contact returned it. Omit for a number the user said.")))
-            .put("required", JSONArray().put("phone_number"))
-            .put("additionalProperties", false),
-        // Placing a call doesn't change or delete anything, so not destructive; it's announced or
-        // confirmed by this tool regardless of the hint.
-        annotations = ToolAnnotations(title = "Call", readOnlyHint = false, destructiveHint = false, openWorldHint = true),
-    )
+    override val definition =
+        ToolDefinition(
+            name = "place_call",
+            description = "Place a phone call from the user's phone. The phone announces the call or asks the user first.",
+            inputSchema =
+                JSONObject()
+                    .put("type", "object")
+                    .put(
+                        "properties",
+                        JSONObject()
+                            .put(
+                                "phone_number",
+                                JSONObject()
+                                    .put("type", "string")
+                                    .put("description", "The number to call, from find_contact or as the user said it."),
+                            ).put(
+                                "contact_name",
+                                JSONObject()
+                                    .put("type", "string")
+                                    .put(
+                                        "description",
+                                        "The contact's full name as find_contact returned it. Omit for a number the user said.",
+                                    ),
+                            ),
+                    ).put("required", JSONArray().put("phone_number"))
+                    .put("additionalProperties", false),
+            // Placing a call doesn't change or delete anything, so not destructive; it's announced or
+            // confirmed by this tool regardless of the hint.
+            annotations = ToolAnnotations(title = "Call", readOnlyHint = false, destructiveHint = false, openWorldHint = true),
+        )
 
     override suspend fun prepare(arguments: JSONObject): PendingAction {
         val number = arguments.optString("phone_number").trim()
         val name = arguments.optString("contact_name").trim()
-        require(ContactDirectory.isPhoneNumber(number, minDigits = 2)) { "A plain phone number is required: digits only, no codes or letters" }
+        require(
+            ContactDirectory.isPhoneNumber(number, minDigits = 2),
+        ) { "A plain phone number is required: digits only, no codes or letters" }
 
         // Apps can't place emergency calls directly; open the default dialer with the number so the user presses call.
         // Checked on digits only, since "9 1 1" passes the plain-number check.
@@ -77,14 +90,15 @@ class PlaceCallTool(
         // Certain: announce the contact the model named. Otherwise ask, naming everyone the number belongs
         // to. Either way a contact's saved number is dialed, never the model's text.
         val match = certainMatch(name, number)
-        val (confirmation, dialed) = if (match != null) {
-            val (contactName, saved) = match
-            val who = "$contactName, ${saved.label.lowercase()}"
-            Confirmation.Announce("Calling $who.", "Call $who?") to saved.number
-        } else {
-            val recipient = contacts?.recipient(number) ?: Recipient.of(number)
-            Confirmation.Ask("Call ${recipient.description}?") to recipient.number
-        }
+        val (confirmation, dialed) =
+            if (match != null) {
+                val (contactName, saved) = match
+                val who = "$contactName, ${saved.label.lowercase()}"
+                Confirmation.Announce("Calling $who.", "Call $who?") to saved.number
+            } else {
+                val recipient = contacts?.recipient(number) ?: Recipient.of(number)
+                Confirmation.Ask("Call ${recipient.description}?") to recipient.number
+            }
         return PendingAction(confirmation) {
             placeCall(dialed)
             closePanel()
@@ -96,7 +110,10 @@ class PlaceCallTool(
      * The contact name and its saved number when certain: [name] matches exactly one contact, [number] is one
      * of its numbers, and no other number of that contact has the same type (plan §5a). Null otherwise.
      */
-    private suspend fun certainMatch(name: String, number: String): Pair<String, PhoneNumber>? {
+    private suspend fun certainMatch(
+        name: String,
+        number: String,
+    ): Pair<String, PhoneNumber>? {
         if (contacts == null || name.isEmpty()) return null
         val contact = contacts.find(name).singleOrNull() ?: return null
         return certainNumber(contact, number)?.let { contact.name to it }

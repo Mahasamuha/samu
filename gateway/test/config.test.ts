@@ -58,7 +58,11 @@ describe("loadConfig", () => {
     for (const name of Object.keys(base)) {
       const env: Record<string, string> = { ...base };
       delete env[name];
-      assert.throws(() => loadConfig(env), (e) => e instanceof ConfigError && e.message.includes(name), name);
+      assert.throws(
+        () => loadConfig(env),
+        (e) => e instanceof ConfigError && e.message.includes(name),
+        name,
+      );
     }
   });
 
@@ -67,34 +71,64 @@ describe("loadConfig", () => {
   });
 
   test("the issuer and JWKS URLs must be https", () => {
-    assert.throws(() => loadConfig({ ...base, ISSUER_URL: "http://idp.example.invalid/" }), /ISSUER_URL must be an https URL/);
-    assert.throws(() => loadConfig({ ...base, JWKS_URL: "http://idp.example.invalid/jwks" }), /JWKS_URL must be an https URL/);
+    assert.throws(
+      () => loadConfig({ ...base, ISSUER_URL: "http://idp.example.invalid/" }),
+      /ISSUER_URL must be an https URL/,
+    );
+    assert.throws(
+      () =>
+        loadConfig({ ...base, JWKS_URL: "http://idp.example.invalid/jwks" }),
+      /JWKS_URL must be an https URL/,
+    );
   });
 
   test("URLs must parse", () => {
-    assert.throws(() => loadConfig({ ...base, UPSTREAM_URL: "not a url" }), /UPSTREAM_URL is not a valid URL/);
-    assert.throws(() => loadConfig({ ...base, MCP_URL: "nope" }), /MCP_URL is not a valid URL/);
+    assert.throws(
+      () => loadConfig({ ...base, UPSTREAM_URL: "not a url" }),
+      /UPSTREAM_URL is not a valid URL/,
+    );
+    assert.throws(
+      () => loadConfig({ ...base, MCP_URL: "nope" }),
+      /MCP_URL is not a valid URL/,
+    );
   });
 
   test("trailing slashes are stripped from upstream URLs", () => {
-    const config = loadConfig({ ...base, UPSTREAM_URL: "http://127.0.0.1:9000///", MCP_URL: "http://127.0.0.1:9100/" });
+    const config = loadConfig({
+      ...base,
+      UPSTREAM_URL: "http://127.0.0.1:9000///",
+      MCP_URL: "http://127.0.0.1:9100/",
+    });
     assert.equal(config.upstreamUrl, "http://127.0.0.1:9000");
     assert.equal(config.mcpUrl, "http://127.0.0.1:9100");
   });
 
   test("integers must be non-negative whole numbers; empty falls back to the default", () => {
-    for (const bad of ["-1", "1.5", "abc"]) assert.throws(() => loadConfig({ ...base, PORT: bad }), /PORT must be a non-negative integer/);
+    for (const bad of ["-1", "1.5", "abc"])
+      assert.throws(
+        () => loadConfig({ ...base, PORT: bad }),
+        /PORT must be a non-negative integer/,
+      );
     assert.equal(loadConfig({ ...base, PORT: "" }).port, 8080);
-    assert.equal(loadConfig({ ...base, RATE_LIMIT_BURST: "0" }).rateLimit.burst, 0);
+    assert.equal(
+      loadConfig({ ...base, RATE_LIMIT_BURST: "0" }).rateLimit.burst,
+      0,
+    );
   });
 
   test("durations accept s, m, h, d and 0; anything else is an error", () => {
-    const retention = (value: string) => loadConfig({ ...base, LOG_BODY_RETENTION: value }).logBodyRetentionMs;
+    const retention = (value: string) =>
+      loadConfig({ ...base, LOG_BODY_RETENTION: value }).logBodyRetentionMs;
     assert.equal(retention("0"), 0);
     assert.equal(retention("45s"), 45_000);
     assert.equal(retention("30m"), 1_800_000);
     assert.equal(retention("24h"), 86_400_000);
     assert.equal(retention("2d"), 172_800_000);
-    for (const bad of ["24", "h", "1w", "-5m", "1.5h", "5 m"]) assert.throws(() => retention(bad), /LOG_BODY_RETENTION must look like/, bad);
+    for (const bad of ["24", "h", "1w", "-5m", "1.5h", "5 m"])
+      assert.throws(
+        () => retention(bad),
+        /LOG_BODY_RETENTION must look like/,
+        bad,
+      );
   });
 });
