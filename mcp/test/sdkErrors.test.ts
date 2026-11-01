@@ -15,11 +15,11 @@ async function connect(): Promise<Client> {
   server.registerTool(
     "echo",
     { inputSchema: { text: z.string() } },
-    async ({ text }) => ({
+    ({ text }) => ({
       content: [{ type: "text", text }],
     }),
   );
-  server.registerTool("boom", {}, async () => {
+  server.registerTool("boom", {}, () => {
     throw new Error("upstream failed");
   });
 

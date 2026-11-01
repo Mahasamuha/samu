@@ -117,7 +117,7 @@ describe("BodyLog", () => {
       .trim()
       .split("\n");
     assert.deepEqual(
-      lines.map((l) => JSON.parse(l)),
+      lines.map((l) => JSON.parse(l) as unknown),
       [{ n: 1 }, { n: 2 }],
     );
 

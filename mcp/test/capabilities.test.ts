@@ -240,7 +240,7 @@ function stubServer(tools: Record<string, Record<string, unknown>>): McpServer {
     server.registerTool(
       name,
       { inputSchema: { q: z.string() }, ...config },
-      async () => ({ content: [] }),
+      () => ({ content: [] }),
     );
   }
   return server;
@@ -255,7 +255,13 @@ const asIndex = (v: unknown) =>
   v as {
     version: number;
     capabilities: { id: string }[];
-    tools: { name: string; [k: string]: any }[];
+    tools: {
+      name: string;
+      title?: string;
+      description?: string;
+      inputSchema: { properties: Record<string, { type: string }> };
+      annotations: { readOnlyHint?: boolean; openWorldHint?: boolean };
+    }[];
     skills: { name: string }[];
   };
 
@@ -286,7 +292,7 @@ test("the index has version 1 and the capabilities, tools and skills", async () 
   assert.equal(tool?.name, "web_search");
   assert.equal(tool?.title, "Web search");
   assert.equal(tool?.description, "Search.");
-  assert.equal((tool?.inputSchema as any).properties.q.type, "string");
+  assert.equal(tool?.inputSchema.properties.q?.type, "string");
   assert.deepEqual(tool?.annotations, {
     readOnlyHint: true,
     openWorldHint: true,

@@ -159,7 +159,7 @@ export async function weather(
     result.days = days
       .filter((point) => {
         const date = local(point.time, zone).date;
-        return date >= day! && date <= endDay;
+        return date >= day && date <= endDay;
       })
       .map(dayJson);
   }

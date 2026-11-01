@@ -67,16 +67,34 @@ const springfields = {
   ],
 };
 
+/** The parts of a weather result these tests read; the tool itself returns a loose record. */
+interface Summary {
+  [key: string]: string | undefined;
+}
+interface Result {
+  place: string;
+  now: Summary;
+  next_hour: string;
+  today: Summary;
+  day: Summary;
+  days: Summary[];
+  hours: Summary[];
+  alerts: Summary[];
+}
+
+type Request = Parameters<typeof weather>[1];
+
+async function run(request: Request, config = testConfig()): Promise<Result> {
+  return (await weather(config, request)) as unknown as Result;
+}
+
 function route(url: URL): unknown {
   return url.hostname.startsWith("geocoding") ? springfields : forecast;
 }
 
 test("current conditions: now, next hour, today, remaining hours, alerts", async () => {
   stubFetch(route);
-  const r = (await weather(testConfig(), { place: "Springfield" })) as Record<
-    string,
-    any
-  >;
+  const r = await run({ place: "Springfield" });
   assert.equal(r.place, "Springfield, Illinois");
   assert.deepEqual(r.now, {
     temperature: "50°F",
@@ -95,7 +113,7 @@ test("current conditions: now, next hour, today, remaining hours, alerts", async
   });
   // Every third hour after now, through 6 AM tomorrow.
   assert.deepEqual(
-    r.hours.map((h: any) => h.time),
+    r.hours.map((h) => h.time),
     [
       "Sunday 12 PM",
       "Sunday 3 PM",
@@ -106,13 +124,13 @@ test("current conditions: now, next hour, today, remaining hours, alerts", async
       "Monday 6 AM",
     ],
   );
-  assert.equal(r.hours[0].precipitation_chance, "25%");
+  assert.equal(r.hours[0]?.precipitation_chance, "25%");
   assert.equal(r.alerts.length, 1);
-  assert.equal(r.alerts[0].title, "Flood Watch");
-  assert.equal(r.alerts[0].severity, "Severe");
-  assert.equal(r.alerts[0].until, "Monday 6 AM");
-  assert.ok(r.alerts[0].description.startsWith("Heavy rain expected. "));
-  assert.equal(r.alerts[0].description.length, 400);
+  assert.equal(r.alerts[0]?.title, "Flood Watch");
+  assert.equal(r.alerts[0]?.severity, "Severe");
+  assert.equal(r.alerts[0]?.until, "Monday 6 AM");
+  assert.ok(r.alerts[0]?.description?.startsWith("Heavy rain expected. "));
+  assert.equal(r.alerts[0]?.description?.length, 400);
 });
 
 test("no alerts key when there are none; next_hour omitted without minutely data", async () => {
@@ -128,28 +146,28 @@ test("no alerts key when there are none; next_hour omitted without minutely data
 
 test("one day: its summary and hours for that date only", async () => {
   stubFetch(route);
-  const r = (await weather(testConfig(), {
+  const r = await run({
     place: "Springfield",
     day: "2026-11-03",
-  })) as Record<string, any>;
+  });
   assert.equal(r.day.date, "Tuesday, November 3");
   assert.equal(r.day.high, "62°F");
   // Hours exist only for the 3rd (index 48..71 holds the 3rd), at every third hour, labelled without the day.
   assert.equal(r.hours.length, 8);
-  assert.equal(r.hours[0].time, "12 AM");
-  assert.equal(r.hours[7].time, "9 PM");
+  assert.equal(r.hours[0]?.time, "12 AM");
+  assert.equal(r.hours[7]?.time, "9 PM");
   assert.ok(!("now" in r));
 });
 
 test("a range gives one summary per day, inclusive", async () => {
   stubFetch(route);
-  const r = (await weather(testConfig(), {
+  const r = await run({
     place: "Springfield",
     day: "2026-11-02",
     endDay: "2026-11-04",
-  })) as Record<string, any>;
+  });
   assert.deepEqual(
-    r.days.map((d: any) => d.date),
+    r.days.map((d) => d.date),
     ["Monday, November 2", "Tuesday, November 3", "Wednesday, November 4"],
   );
   assert.ok(!("hours" in r));
@@ -157,20 +175,21 @@ test("a range gives one summary per day, inclusive", async () => {
 
 test("end_day equal to day is a single-day request", async () => {
   stubFetch(route);
-  const r = (await weather(testConfig(), {
+  const r = await run({
     place: "Springfield",
     day: "2026-11-02",
     endDay: "2026-11-02",
-  })) as Record<string, any>;
+  });
   assert.ok("day" in r);
   assert.ok(!("days" in r));
 });
 
 test("units change the labels", async () => {
   stubFetch(route);
-  const r = (await weather(testConfig({ weatherUnits: "ca" }), {
-    place: "Springfield",
-  })) as Record<string, any>;
+  const r = await run(
+    { place: "Springfield" },
+    testConfig({ weatherUnits: "ca" }),
+  );
   assert.equal(r.now.temperature, "50°C");
   assert.equal(r.now.wind, "7 km/h");
 });
@@ -254,15 +273,11 @@ test("unknown place is a WeatherError", async () => {
 test("a qualifier picks the matching place, by name or state abbreviation", async () => {
   stubFetch(route);
   assert.equal(
-    ((await weather(testConfig(), { place: "Springfield, OR" })) as any).place,
+    (await run({ place: "Springfield, OR" })).place,
     "Springfield, Oregon",
   );
   assert.equal(
-    (
-      (await weather(testConfig(), {
-        place: "Springfield, Illinois, USA",
-      })) as any
-    ).place,
+    (await run({ place: "Springfield, Illinois, USA" })).place,
     "Springfield, Illinois",
   );
 });

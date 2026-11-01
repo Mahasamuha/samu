@@ -5,7 +5,7 @@ const to = process.env.TEST_FETCH_TO;
 const realFetch = globalThis.fetch;
 
 if (from && to) {
-  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+  globalThis.fetch = (input: string | URL | Request, init?: RequestInit) => {
     const target =
       typeof input === "string"
         ? input
@@ -16,5 +16,5 @@ if (from && to) {
       target.startsWith(from) ? to + target.slice(from.length) : input,
       init,
     );
-  }) as typeof fetch;
+  };
 }

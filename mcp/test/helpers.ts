@@ -30,7 +30,8 @@ export interface FetchCall {
   headers: Record<string, string>;
 }
 
-type Reply = Response | Error | unknown;
+/** A Response, an Error (a network failure), or any JSON-able value. */
+type Reply = unknown;
 
 /**
  * Replaces globalThis.fetch for the current test. `route` receives each request URL and returns a JSON-able
@@ -41,19 +42,21 @@ export function stubFetch(route: (url: URL) => Reply): FetchCall[] {
   mock.method(
     globalThis,
     "fetch",
-    async (input: URL | string, init?: RequestInit) => {
+    (input: URL | string, init?: RequestInit) => {
       const url = new URL(String(input));
       calls.push({
         url,
         headers: { ...(init?.headers as Record<string, string> | undefined) },
       });
       const reply = route(url);
-      if (reply instanceof Error) throw reply;
-      if (reply instanceof Response) return reply;
-      return new Response(JSON.stringify(reply), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
+      if (reply instanceof Error) return Promise.reject(reply);
+      if (reply instanceof Response) return Promise.resolve(reply);
+      return Promise.resolve(
+        new Response(JSON.stringify(reply), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
     },
   );
   return calls;

@@ -166,8 +166,8 @@ export async function startGateway(
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
-  child.stdout?.on("data", (d: Buffer) => (output += d));
-  child.stderr?.on("data", (d: Buffer) => (output += d));
+  child.stdout?.on("data", (d: Buffer) => (output += d.toString()));
+  child.stderr?.on("data", (d: Buffer) => (output += d.toString()));
 
   await waitFor(
     () => output.includes('"event":"listening"') || child.exitCode !== null,

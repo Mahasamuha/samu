@@ -59,6 +59,14 @@ async function connect(config: Config): Promise<Client> {
 
 const toolNames = async (config: Config) =>
   (await (await connect(config)).listTools()).tools.map((t) => t.name).sort();
+/** The parts of the capability index these tests read. */
+interface IndexShape {
+  version: number;
+  capabilities: { id: string }[];
+  tools: { name: string }[];
+  skills: { name: string }[];
+}
+
 const textOf = (r: { contents: object[] }) =>
   (r.contents[0] as { text: string }).text;
 const firstText = (r: Awaited<ReturnType<Client["callTool"]>>) =>
@@ -158,18 +166,18 @@ test("capability://index lists only capabilities whose tools this config registe
   const read = await client.readResource({ uri: "capability://index" });
   const content = read.contents[0] as { text: string; mimeType?: string };
   assert.equal(content.mimeType, "application/json");
-  const index = JSON.parse(content.text);
+  const index = JSON.parse(content.text) as IndexShape;
   assert.equal(index.version, 1);
   assert.deepEqual(
-    index.capabilities.map((c: { id: string }) => c.id),
+    index.capabilities.map((c) => c.id),
     ["search", "weather"],
   );
   assert.deepEqual(
-    index.tools.map((t: { name: string }) => t.name),
+    index.tools.map((t) => t.name),
     ["get_weather", "web_search"],
   );
   assert.deepEqual(
-    index.skills.map((s: { name: string }) => s.name),
+    index.skills.map((s) => s.name),
     ["weather-skill"],
   );
 });
@@ -178,9 +186,9 @@ test("without the weather key the weather capability and its skill leave the ind
   const client = await connect(testConfig({ pirateWeatherApiKey: undefined }));
   const index = JSON.parse(
     textOf(await client.readResource({ uri: "capability://index" })),
-  );
+  ) as IndexShape;
   assert.deepEqual(
-    index.capabilities.map((c: { id: string }) => c.id),
+    index.capabilities.map((c) => c.id),
     ["search"],
   );
   assert.deepEqual(index.skills, []);

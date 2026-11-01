@@ -84,14 +84,17 @@ describe("gateway", () => {
       void res.writeHead(200, { "content-type": "application/json" }).end("{}"),
   ) {
     const seen: Seen[] = [];
-    const server = await upstream(async (req, res) => {
-      seen.push({
-        method: req.method,
-        url: req.url,
-        headers: req.headers,
-        body: (await readAll(req)).toString("utf8"),
+    // The handler type returns void, so the async work is detached; readAll can't fail on a local request.
+    const server = await upstream((req, res) => {
+      void readAll(req).then((body) => {
+        seen.push({
+          method: req.method,
+          url: req.url,
+          headers: req.headers,
+          body: body.toString("utf8"),
+        });
+        respond(req, res);
       });
-      respond(req, res);
     });
     return { server, seen };
   }
@@ -595,10 +598,8 @@ describe("gateway", () => {
       await waitFor(async () => (await bodyRecords(gw.logDir)).length > 0);
       const [record] = await bodyRecords(gw.logDir);
       assert.equal(record?.debug, true);
-      assert.match(
-        String((record?.response as Record<string, unknown>).raw),
-        /response\.output_text\.delta/,
-      );
+      const response = record?.response as Record<string, unknown> | undefined;
+      assert.match(String(response?.raw), /response\.output_text\.delta/);
 
       gw.signal("SIGUSR2");
       await waitFor(() => gw.output().includes('"event":"debug_off"'));
