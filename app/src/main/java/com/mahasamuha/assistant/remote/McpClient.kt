@@ -17,8 +17,12 @@ import org.json.JSONObject
 
 open class McpException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
-/** The server has no tool of that name: the phone's capability index is stale. */
-class McpUnknownToolException(message: String) : McpException(message)
+/**
+ * The server rejected the tool name or its arguments (unknown or disabled tool, or arguments that fail its
+ * schema), so the phone's capability index may be stale. A model's own bad arguments also land here, which
+ * is fine: a refresh is cheap.
+ */
+class McpStaleToolException(message: String) : McpException(message)
 
 /**
  * The few MCP calls the phone needs (`tools/call`, `resources/read`), as JSON-RPC over the auth gateway's
@@ -38,7 +42,10 @@ class McpClient(private val gateways: List<Uri>, private val auth: AuthManager) 
             .map { content.getJSONObject(it) }
             .filter { it.optString("type") == "text" }
             .joinToString("\n") { it.optString("text") }
-        if (result.optBoolean("isError")) throw McpException(text.ifEmpty { "Tool $name failed" })
+        if (result.optBoolean("isError")) {
+            if (text.startsWith(SDK_INVALID_PARAMS_PREFIX)) throw McpStaleToolException(text)
+            throw McpException(text.ifEmpty { "Tool $name failed" })
+        }
         return text
     }
 
@@ -86,9 +93,10 @@ class McpClient(private val gateways: List<Uri>, private val auth: AuthManager) 
         val json = JSONObject(response)
         json.optJSONObject("error")?.let {
             val message = it.optString("message")
-            // The SDK answers an unknown tool with an invalid-params error ("... Tool x not found").
-            if (method == "tools/call" && it.optInt("code") == INVALID_PARAMS && message.contains("not found", ignoreCase = true)) {
-                throw McpUnknownToolException("MCP $method: $message")
+            // Invalid params on a tool call: unknown or disabled tool, or rejected arguments. Our SDK reports
+            // these as an isError result instead (see callTool), but another server or SDK version may not.
+            if (method == "tools/call" && it.optInt("code") == INVALID_PARAMS) {
+                throw McpStaleToolException("MCP $method: $message")
             }
             throw McpException("MCP $method: $message")
         }
@@ -112,6 +120,9 @@ class McpClient(private val gateways: List<Uri>, private val auth: AuthManager) 
 
     private companion object {
         const val INVALID_PARAMS = -32602
+        // The server SDK wraps its own protocol errors from tools/call in an isError result with this text
+        // prefix, rather than a JSON-RPC error. A tool handler's own failure has no such prefix.
+        const val SDK_INVALID_PARAMS_PREFIX = "MCP error -32602:"
         const val PROTOCOL_VERSION = "2025-06-18"
         const val MAX_RESPONSE_BYTES = 64 * 1024
         // The capability index (tool definitions and skills) never reaches the model whole.

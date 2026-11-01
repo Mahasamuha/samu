@@ -13,7 +13,9 @@ import org.json.JSONObject
 
 /**
  * A tool served by the MCP server (plan §4b), from its definition in the capability index. The call goes
- * through [client]; [onStale] runs when the server doesn't know the tool, i.e. the index is out of date.
+ * through [client]; [onStale] runs when the server rejects the call as an unknown or disabled tool, or for
+ * arguments it won't accept, i.e. the index may be out of date. A model's own bad arguments also trigger
+ * it, which is acceptable since a refresh is cheap.
  */
 fun remoteTool(definition: ToolDefinition, client: McpClient, onStale: () -> Unit): Tool =
     if (definition.annotations.readOnlyHint) RemoteReadOnlyTool(definition, client, onStale) else RemoteActionTool(definition, client, onStale)
@@ -21,8 +23,8 @@ fun remoteTool(definition: ToolDefinition, client: McpClient, onStale: () -> Uni
 /** Calls the tool, reporting a stale index before the failure goes to the model. */
 private suspend fun call(client: McpClient, definition: ToolDefinition, arguments: JSONObject, onStale: () -> Unit): String = try {
     client.callTool(definition.name, arguments)
-} catch (e: McpUnknownToolException) {
-    Log.w(TAG, "Server doesn't know ${definition.name}; the capability index is stale")
+} catch (e: McpStaleToolException) {
+    Log.w(TAG, "Server rejected ${definition.name} (${e.message}); refreshing the capability index")
     onStale()
     throw e
 }

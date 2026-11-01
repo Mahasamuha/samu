@@ -138,4 +138,4 @@ Initial load settings (tune from logs): eager = calling, texting, clock, music, 
 
 ## Open issues
 
-- **Stale remote tool detection is too narrow** (2026-11-01). `McpClient` only raises `McpUnknownToolException`, which schedules a cache refresh, when `tools/call` returns -32602 with "not found" in the message. That is an SDK-specific error shape we haven't verified. Refreshing the index is cheap, so the trigger should be broader, e.g. any `tools/call` protocol error for a tool in the cached index, though probably not every tool failure. Not yet decided.
+- **Resolved: stale remote tool detection** (2026-11-01). The SDK (1.32.1) returns its protocol errors from `tools/call` as an `isError` result with text `MCP error <code>: ...`, not as a JSON-RPC error, so the original JSON-RPC check never fired. The phone now refreshes the index on `MCP error -32602:` (unknown or disabled tool, rejected arguments), in either form. Tool-handler failures and transport failures don't refresh. Arguments the server no longer knows are silently dropped by the SDK, so that change can't be detected and there is no workaround; the next refresh at panel open picks it up.
