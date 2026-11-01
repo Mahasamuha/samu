@@ -5,6 +5,7 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ktlint)
 }
 
 // Real endpoints live in the gitignored config.local.properties (see config.example.properties).
@@ -169,7 +170,14 @@ androidComponents {
     }
 }
 
+// Style checks run on their own (`./gradlew ktlintCheck`); the plugin hooks them into `check`, not `assemble`.
+ktlint {
+    version.set(libs.versions.ktlint)
+    // Rule configuration lives in .editorconfig; the build only picks the engine version and rulesets.
+}
+
 dependencies {
+    ktlintRuleset(libs.ktlint.compose.rules)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)

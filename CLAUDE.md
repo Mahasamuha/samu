@@ -52,6 +52,7 @@ No infrastructure specifics go into tracked files or commit messages. This cover
 - Throw exceptions and handle them at the boundary.
 - Never hardcode secrets. Use env vars, and commit `.env.example` files, never `.env`.
 - Write unit tests for new and changed logic, and run them in CI. Tests don't need a device; on-device checks stay in the phase notes.
+- Style follows the configured formatters and linters (ktlint, Prettier, ESLint; see `docs/testing.md`). A deviation needs a noted reason, in the config or at the suppression.
 - Commit messages use conventional prefixes (`feat:`, `fix:`, `chore:`).
 
 **TypeScript (gateway)**

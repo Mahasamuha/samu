@@ -1,6 +1,6 @@
 name: Checks
 
-# Typecheck and unit tests for each build unit. Also called by images.yml, so an image is never published
+# Style, lint, typecheck and unit tests for each build unit. Also called by images.yml, so an image is never published
 # from a commit that fails them.
 on:
   push:
@@ -35,6 +35,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - run: pnpm format:check
+
+      # pnpm lint (typescript-eslint) is off until typescript-eslint supports TypeScript 7; see docs/testing.md.
+
       - run: pnpm typecheck
 
       - run: pnpm test
@@ -58,6 +62,8 @@ jobs:
       # The build reads the gitignored config.local.properties; the example's placeholders are enough to compile.
       - name: Use the example app config
         run: cp config.example.properties config.local.properties
+
+      - run: ./gradlew ktlintCheck
 
       - run: ./gradlew testDebugUnitTest assembleDebug
 
