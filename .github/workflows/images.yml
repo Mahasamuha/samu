@@ -13,7 +13,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The same typecheck and unit tests as on every push; nothing is tagged or published if they fail.
+  checks:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/checks.yml
+
   version:
+    needs: checks
     runs-on: ubuntu-latest
     permissions:
       contents: write

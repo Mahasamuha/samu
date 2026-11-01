@@ -10,7 +10,8 @@
   "packageManager": "pnpm@10.33.2",
   "scripts": {
     "build": "tsc -p .",
-    "typecheck": "tsc -p . --noEmit",
+    "typecheck": "tsc -p . --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "rm -rf build-test && tsc -p tsconfig.test.json && node --test \"build-test/test/**/*.test.js\"",
     "start": "node dist/index.js"
   },
   "dependencies": {

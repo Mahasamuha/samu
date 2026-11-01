@@ -21,6 +21,7 @@ captures/
 # Node
 node_modules/
 dist/
+build-test/
 
 # IDE / OS
 .idea/

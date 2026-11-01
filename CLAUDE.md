@@ -51,7 +51,7 @@ No infrastructure specifics go into tracked files or commit messages. This cover
 - Readability over cleverness.
 - Throw exceptions and handle them at the boundary.
 - Never hardcode secrets. Use env vars, and commit `.env.example` files, never `.env`.
-- Don't write tests unless asked.
+- Write unit tests for new and changed logic, and run them in CI. Tests don't need a device; on-device checks stay in the phase notes.
 - Commit messages use conventional prefixes (`feat:`, `fix:`, `chore:`).
 
 **TypeScript (gateway)**
@@ -65,6 +65,7 @@ No infrastructure specifics go into tracked files or commit messages. This cover
 - `minSdk`/`targetSdk`/`compileSdk` = 37. Only one device exists, so there's no reason to support older APIs.
 - Use AppAuth-Android for OAuth (auth code + PKCE via custom tab).
 - Store the refresh token encrypted with a hardware-backed Android Keystore key.
+- A dependency that is one operation (a callback, a platform call, a test seam) is a function type, with a `typealias` when the signature is long or repeated. Use an `interface` for real swap points (STT, TTS, LLM endpoint) and multi-operation roles; `fun interface` only when a lambda won't do.
 - Keep dependencies lean. Ask before adding a DI framework; manual construction is fine at this size.
 
 ## Android 17 gotchas (details in plan §3)
