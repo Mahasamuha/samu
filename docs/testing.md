@@ -3,7 +3,7 @@
 CI (`.github/workflows/checks.yml`) runs all of these on every push and pull request; `images.yml` runs it first.
 
 **gateway/ and mcp/** — `node:test` with `node:assert/strict`, no extra dependency. Tests live in `<unit>/test/*.test.ts`
-and import from `../src/*.js`. `tsc -p tsconfig.test.json` compiles `src` and `test` into the gitignored `build-test/`
+and import from `../src/*.js`. `tsc -p test` (config in `test/tsconfig.json`) compiles `src` and `test` into the gitignored `build-test/`
 (Node's type stripping can't handle this code), then `node --test` runs the compiled files.
 
 ```
@@ -30,8 +30,8 @@ formatter, not by hand.
 **Guides.** Kotlin follows the [Kotlin coding conventions](https://kotlinlang.org/docs/coding-conventions.html) through
 ktlint's `ktlint_official` style, plus the [Compose API guidelines](https://github.com/androidx/androidx/blob/androidx-main/compose/docs/compose-api-guidelines.md)
 through the [compose-rules](https://mrmans0n.github.io/compose-rules/) ktlint ruleset. TypeScript uses Prettier for
-formatting and typescript-eslint's `recommended` and `recommendedTypeChecked` presets for lint (`eslint-config-prettier`
-last, so ESLint never fights Prettier).
+formatting and oxlint (type-aware, through oxlint-tsgolint) for lint, with a rule set that mirrors ESLint's `recommended`
+plus typescript-eslint's `recommendedTypeChecked`. It has no style rules, so it never fights Prettier.
 
 **app/** — ktlint through the `org.jlleitschuh.gradle.ktlint` plugin (chosen over kotlinter for its wider use and its
 `ktlintRuleset` configuration, which loads the Compose rules). Versions are pinned in `gradle/libs.versions.toml`, including
@@ -44,26 +44,33 @@ cd app
 ./gradlew ktlintFormat    # auto-fix; run it twice, some rules only settle on the second pass
 ```
 
-**gateway/ and mcp/** — each unit has its own copy of `eslint.config.js`, `.prettierrc.json` and `.prettierignore`.
+**gateway/ and mcp/** — each unit has its own copy of `.oxlintrc.json`, `.prettierrc.json` and `.prettierignore`.
 
 ```
 cd gateway   # or mcp
 pnpm format:check   # prettier --check
 pnpm format         # prettier --write
-pnpm lint           # eslint src test
+pnpm lint           # oxlint --type-aware src test
 ```
 
-Prettier runs on its defaults (including `printWidth` 80); the repo has no reason to differ. ESLint has one deviation: the
-node:test functions (`test`, `describe`, `it`) are allowed to go unawaited under `no-floating-promises`, because the runner
-collects them.
+Prettier runs on its defaults (including `printWidth` 80); the repo has no reason to differ.
 
-typescript-eslint 8.x supports TypeScript below 6.1 only and refuses to load under TypeScript 7 (tracked upstream in
-typescript-eslint/typescript-eslint#10940). Until that is resolved, `pnpm lint` fails at startup, and CI doesn't run it
-(decided 2026-11-01). The documented workaround, aliasing `typescript` to `@typescript/typescript6` and installing
-TypeScript 7 as `@typescript/native` for `tsc`, was rejected: it changes which compiler the production build resolves just
-to satisfy a lint tool. When typescript-eslint supports TypeScript 7, bump it, fix the findings (about 5 in gateway and
-60 in mcp, mostly loose `any` handling of JSON in mcp tests), and restore the CI step.
+oxlint plus oxlint-tsgolint (type-aware linting on typescript-go) was chosen on 2026-11-01 because typescript-eslint
+doesn't support TypeScript 7 (typescript-eslint/typescript-eslint#10940). The alternative, aliasing `typescript` to
+`@typescript/typescript6` for ESLint, would change which compiler the production build resolves just to satisfy a lint
+tool. Notes:
 
-**Deviations.** Any departure from the style is either configured in `.editorconfig` or the ESLint config with a comment
+- `.oxlintrc.json` is JSONC, so comments are allowed. It enables the equivalents of ESLint `recommended` and
+  typescript-eslint `recommendedTypeChecked` explicitly, with the `correctness` category and extra plugins off.
+- One deviation: the node:test functions (`test`, `describe`, `it`) are allowed to go unawaited under
+  `typescript/no-floating-promises` (`allowForKnownSafeCalls`), because the runner collects them.
+- `oxlint` and `oxlint-tsgolint` are pinned exactly and must be bumped together (oxlint's peer dependency sets the
+  minimum tsgolint).
+- tsgolint only discovers files named `tsconfig.json`, which is why the test config is `test/tsconfig.json` rather than
+  `tsconfig.test.json`: `src` resolves to the root config and `test` to its own.
+- Known gap: oxlint's `no-unused-vars` ignores `_`-prefixed variables, which typescript-eslint's recommended config
+  would flag.
+
+**Deviations.** Any departure from the style is either configured in `.editorconfig` or the oxlint config with a comment
 saying why, or suppressed at the spot with a reason: `@Suppress("rule")` in Kotlin, or
-`// eslint-disable-next-line rule -- reason` in TypeScript. Don't add one just to make a check pass.
+`// oxlint-disable-next-line rule -- reason` in TypeScript. Don't add one just to make a check pass.

@@ -37,7 +37,7 @@ jobs:
 
       - run: pnpm format:check
 
-      # pnpm lint (typescript-eslint) is off until typescript-eslint supports TypeScript 7; see docs/testing.md.
+      - run: pnpm lint
 
       - run: pnpm typecheck
 
