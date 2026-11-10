@@ -3,6 +3,7 @@ package com.mahasamuha.assistant.voice
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -52,34 +53,49 @@ class PlatformSpeechToText(
                 throw OnDeviceSttUnavailableException()
             }
             val recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+            val tracker = ListenTracker(SystemClock::elapsedRealtime)
 
             recognizer.setRecognitionListener(
                 object : RecognitionListener {
                     override fun onPartialResults(partialResults: Bundle) {
-                        firstResult(partialResults)?.let { trySend(SttEvent.Partial(it)) }
+                        firstResult(partialResults)?.let {
+                            tracker.onPartial(it)?.let { ms -> Log.i(TAG, "STT +${ms}ms first partial") }
+                            trySend(SttEvent.Partial(it))
+                        }
                     }
 
                     override fun onResults(results: Bundle) {
+                        Log.i(TAG, "STT +${tracker.offsetMs()}ms final result")
                         trySend(SttEvent.Final(firstResult(results).orEmpty()))
                         close()
                     }
 
                     override fun onError(error: Int) {
-                        Log.i(TAG, "STT error $error")
-                        close(SttException(error))
+                        val outcome = tracker.onError(error)
+                        Log.i(TAG, "STT +${outcome.offsetMs}ms error $error, partial used: ${outcome.rescuedText != null}")
+                        if (outcome.rescuedText != null) {
+                            trySend(SttEvent.Final(outcome.rescuedText))
+                            close()
+                        } else {
+                            close(SttException(error))
+                        }
                     }
 
                     override fun onReadyForSpeech(params: Bundle?) {
-                        Log.i(TAG, "STT ready")
+                        Log.i(TAG, "STT +${tracker.offsetMs()}ms ready")
                     }
 
-                    override fun onBeginningOfSpeech() = Unit
+                    override fun onBeginningOfSpeech() {
+                        Log.i(TAG, "STT +${tracker.offsetMs()}ms beginning of speech")
+                    }
 
                     override fun onRmsChanged(rmsdB: Float) = Unit
 
                     override fun onBufferReceived(buffer: ByteArray?) = Unit
 
-                    override fun onEndOfSpeech() = Unit
+                    override fun onEndOfSpeech() {
+                        Log.i(TAG, "STT +${tracker.offsetMs()}ms end of speech")
+                    }
 
                     override fun onEvent(
                         eventType: Int,
