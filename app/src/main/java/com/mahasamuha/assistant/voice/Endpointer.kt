@@ -61,6 +61,11 @@ class Endpointer(
         /** Wait for text on the session's first listen, when a cold engine may be slow to produce any. */
         const val FIRST_WAIT_MS = 6_000
 
-        fun waitSilenceMs(firstInSession: Boolean) = if (firstInSession) FIRST_WAIT_MS else REPLY_WAIT_MS
+        /** Silence after text on a confirmation reply: a lone "yes" or "no" is often followed by a second word. */
+        const val CONFIRMATION_END_SILENCE_MS = 1_200
+
+        fun waitSilenceMs(kind: ListenKind) = if (kind == ListenKind.First) FIRST_WAIT_MS else REPLY_WAIT_MS
+
+        fun endSilenceMs(kind: ListenKind) = if (kind == ListenKind.Confirmation) CONFIRMATION_END_SILENCE_MS else END_SILENCE_MS
     }
 }

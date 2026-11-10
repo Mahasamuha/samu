@@ -37,10 +37,13 @@ class ListenTracker(
         return offsetMs()
     }
 
-    fun onError(code: Int): ListenErrorOutcome = ListenErrorOutcome(offsetMs(), lastPartial.takeIf { code == ERROR_NO_MATCH })
+    fun onError(code: Int): ListenErrorOutcome = ListenErrorOutcome(offsetMs(), lastPartial.takeIf { isNoSpeech(code) })
 
-    /** Mirrors `SpeechRecognizer.ERROR_NO_MATCH`, kept here so this class stays off Android. */
+    /** Mirrors `SpeechRecognizer.ERROR_SPEECH_TIMEOUT` and `ERROR_NO_MATCH`, kept here so this class stays off Android. */
     companion object {
+        const val ERROR_SPEECH_TIMEOUT = 6
         const val ERROR_NO_MATCH = 7
+
+        fun isNoSpeech(code: Int) = code == ERROR_SPEECH_TIMEOUT || code == ERROR_NO_MATCH
     }
 }

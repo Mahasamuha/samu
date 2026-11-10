@@ -45,16 +45,19 @@ class SttException(
 /** No on-device recognizer; the platform's default one may send audio off the phone, so it isn't used. */
 class OnDeviceSttUnavailableException : Exception("On-device speech recognition is unavailable")
 
+/** What a listen is for: the session's first request, a later reply or follow-up, or a yes/no confirmation. */
+enum class ListenKind { First, Reply, Confirmation }
+
 /**
  * One utterance per [listen]: [SttEvent.Level]s and partial results, then a single [SttEvent.Final], then completion.
  * [expected] are words or phrases to favor (e.g. yes/no while confirming); implementations may ignore it.
- * [firstInSession] is false once Samu has spoken in this session (replies, follow-ups, confirmations); an
- * implementation that endpoints itself may wait less for a reply. Implementations may ignore it.
+ * [kind] says what is being listened for; an implementation that endpoints itself may wait less for a reply and
+ * more for a confirmation. Implementations may ignore it.
  */
 interface SpeechToText {
     fun listen(
         expected: List<String> = emptyList(),
-        firstInSession: Boolean = true,
+        kind: ListenKind = ListenKind.First,
     ): Flow<SttEvent>
 }
 
@@ -64,7 +67,7 @@ class PlatformSpeechToText(
 ) : SpeechToText {
     override fun listen(
         expected: List<String>,
-        firstInSession: Boolean,
+        kind: ListenKind,
     ): Flow<SttEvent> =
         callbackFlow {
             if (!SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
@@ -154,7 +157,7 @@ internal fun ProducerScope<SttEvent>.recognitionListener(
                 if (segments == null) {
                     outcome.rescuedText
                 } else {
-                    segments.pendingText().takeIf { error == ListenTracker.ERROR_NO_MATCH && it.isNotEmpty() }
+                    segments.pendingText().takeIf { ListenTracker.isNoSpeech(error) && it.isNotEmpty() }
                 }
             Log.i(TAG, "$label +${outcome.offsetMs}ms error $error, partial used: ${rescued != null}")
             onEnd()

@@ -219,11 +219,14 @@ class VoiceSessionController(
         if (!hasMicPermission()) throw UserFacingException("I need microphone access. Open the assistant app to allow it.")
     }
 
-    private suspend fun hear(expected: List<String> = emptyList()): String {
+    private suspend fun hear(
+        expected: List<String> = emptyList(),
+        kind: ListenKind = if (hasSpoken) ListenKind.Reply else ListenKind.First,
+    ): String {
         _state.update { it.copy(phase = PanelState.Phase.Listening, level = 0f, engineUp = false, listenId = it.listenId + 1) }
         var final = ""
         try {
-            collectHeard(expected) { final = it }
+            collectHeard(expected, kind) { final = it }
         } finally {
             _state.update { it.copy(level = 0f) }
         }
@@ -232,9 +235,10 @@ class VoiceSessionController(
 
     private suspend fun collectHeard(
         expected: List<String>,
+        kind: ListenKind,
         onFinal: (String) -> Unit,
     ) {
-        stt.listen(expected, firstInSession = !hasSpoken).collect { event ->
+        stt.listen(expected, kind).collect { event ->
             when (event) {
                 is SttEvent.Level -> {
                     _state.update { it.copy(level = event.value) }
@@ -395,7 +399,7 @@ class VoiceSessionController(
     private suspend fun hearConfirmation(): Pair<ConfirmationResult, String?> {
         val reply =
             try {
-                hear(ConfirmationReply.EXPECTED)
+                hear(ConfirmationReply.EXPECTED, ListenKind.Confirmation)
             } catch (e: SttException) {
                 if (!e.noSpeech) throw e
                 ""

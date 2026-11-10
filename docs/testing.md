@@ -74,3 +74,21 @@ tool. Notes:
 **Deviations.** Any departure from the style is either configured in `.editorconfig` or the oxlint config with a comment
 saying why, or suppressed at the spot with a reason: `@Suppress("rule")` in Kotlin, or
 `// oxlint-disable-next-line rule -- reason` in TypeScript. Don't add one just to make a check pass.
+
+# Dependency verification
+
+`app/gradle/verification-metadata.xml` pins a SHA-256 checksum for every artifact Gradle resolves (libraries, plugins
+and their POM/module files). Gradle fails the build if a downloaded file doesn't match, so a tampered or swapped artifact
+(including one served by a compromised repository) is caught. Checksums only; signature verification is off. JitPack is
+declared as exclusive content for the one group that needs it, so it can't serve anything else.
+
+When a dependency or plugin changes, regenerate from `app/`:
+
+```
+./gradlew --write-verification-metadata sha256 testDebugUnitTest ktlintCheck assembleDebug assembleRelease lint
+```
+
+`lint` is included so its tooling dependencies are covered; it may report lint errors, which is separate from the
+metadata being written. Then review the diff of the metadata file: new entries should match the dependency you
+intended to add or bump, and nothing else (no `<trust>` blanket entries, no unrelated groups). Don't regenerate just
+to make a verification failure go away; a mismatch on an unchanged version is the case the file exists to catch.

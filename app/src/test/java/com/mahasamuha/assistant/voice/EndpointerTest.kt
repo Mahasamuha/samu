@@ -73,8 +73,25 @@ class EndpointerTest {
 
     @Test
     fun waitDependsOnListenKind() {
-        assertEquals(6_000, Endpointer.waitSilenceMs(firstInSession = true))
-        assertEquals(4_000, Endpointer.waitSilenceMs(firstInSession = false))
+        assertEquals(6_000, Endpointer.waitSilenceMs(ListenKind.First))
+        assertEquals(4_000, Endpointer.waitSilenceMs(ListenKind.Reply))
+        assertEquals(4_000, Endpointer.waitSilenceMs(ListenKind.Confirmation))
+    }
+
+    @Test
+    fun confirmationsWaitLongerAfterText() {
+        assertEquals(800, Endpointer.endSilenceMs(ListenKind.First))
+        assertEquals(800, Endpointer.endSilenceMs(ListenKind.Reply))
+        assertEquals(1_200, Endpointer.endSilenceMs(ListenKind.Confirmation))
+        val e =
+            Endpointer(
+                frameMs = 20,
+                waitSilenceMs = 4_000,
+                endSilenceMs = Endpointer.endSilenceMs(ListenKind.Confirmation),
+            )
+        e.onTextHeard()
+        assertNull(e.feed(speech = false, frames = 59)) // 1180 ms
+        assertEquals(EndReason.Silence, e.onFrame(false))
     }
 
     @Test

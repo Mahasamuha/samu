@@ -14,9 +14,12 @@ import com.konovalov.vad.webrtc.VadWebRTC
 import com.konovalov.vad.webrtc.config.FrameSize
 import com.konovalov.vad.webrtc.config.Mode
 import com.konovalov.vad.webrtc.config.SampleRate
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
@@ -51,7 +54,7 @@ class PipedSpeechToText(
     @SuppressLint("MissingPermission") // The session checks RECORD_AUDIO before listening.
     override fun listen(
         expected: List<String>,
-        firstInSession: Boolean,
+        kind: ListenKind,
     ): Flow<SttEvent> =
         callbackFlow {
             if (!SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
@@ -70,26 +73,49 @@ class PipedSpeechToText(
                     AudioFormat.ENCODING_PCM_16BIT,
                     maxOf(minBytes, chunkBytes * 4),
                 )
-            if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
-                audioRecord.release()
-                throw IllegalStateException("AudioRecord failed to initialise (microphone busy or permission missing)")
-            }
-            val (readSide, writeSide) = ParcelFileDescriptor.createPipe()
-            val pump =
-                AudioPump(
-                    ParcelFileDescriptor.AutoCloseOutputStream(writeSide),
-                    idleChunkBytes = chunkBytes,
-                    pace = { delay(VAD_FRAME_MS.toLong() * FRAMES_PER_CHUNK) },
-                )
 
+            // Everything below this point is torn down by cleanup(), which can run from several places and must be
+            // safe to repeat; the resources it frees are created one by one inside the try further down.
             val capFired = AtomicBoolean(false)
             val ended = AtomicBoolean(false)
-
+            val cleanedUp = AtomicBoolean(false)
+            val recordReleased = AtomicBoolean(false)
+            val vadClosed = AtomicBoolean(false)
             val levelStats = ListenLevelStats()
+            var pump: AudioPump? = null
+            var readSide: ParcelFileDescriptor? = null
+            var writeSide: ParcelFileDescriptor? = null
+            var recognizer: SpeechRecognizer? = null
+            var vad: VadWebRTC? = null
+            var readerLaunched = false
+
+            // An unexpected exception on the io scope fails this listen instead of crashing the process.
+            val io =
+                CoroutineScope(
+                    Dispatchers.IO + SupervisorJob() +
+                        CoroutineExceptionHandler { _, e ->
+                            Log.w(TAG, "$LABEL: unexpected failure on the io scope", e)
+                            close(e)
+                        },
+                )
+
+            // Stop after release throws, so both are guarded; the reader's finally and cleanup() may both get here.
+            fun releaseRecord() {
+                if (!recordReleased.compareAndSet(false, true)) return
+                runCatching { audioRecord.stop() }
+                audioRecord.release()
+            }
+
+            // The native VAD must not be closed under a frame being scored, so once the reader has launched it
+            // closes the VAD itself (in its finally, which always runs); cleanup() only does so before that.
+            fun closeVad() {
+                if (!vadClosed.compareAndSet(false, true)) return
+                runCatching { vad?.close() }
+            }
 
             // Idempotent, any thread. Real audio queued behind a closed gate is released at the end of the listen.
             fun openGate(reason: String) {
-                val queued = pump.openGate() ?: return
+                val queued = pump?.openGate() ?: return
                 val queuedMs = queued / BYTES_PER_MS
                 Log.i(TAG, "$LABEL +${tracker.offsetMs()}ms gate open ($reason), $queuedMs ms of real audio queued")
             }
@@ -104,56 +130,52 @@ class PipedSpeechToText(
             ) {
                 if (releaseGate) openGate(reason)
                 if (!ended.compareAndSet(false, true)) return
-                pump.finish()
+                pump?.finish()
                 Log.i(TAG, "$LABEL +${tracker.offsetMs()}ms capture ended ($reason), cap fired: ${capFired.get()}")
                 Log.i(TAG, "$LABEL ${levelStats.summary()}")
             }
 
-            val endpointer = Endpointer(frameMs = VAD_FRAME_MS, waitSilenceMs = Endpointer.waitSilenceMs(firstInSession))
-            val recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
-            val transcript = SegmentedTranscript()
-            recognizer.setRecognitionListener(
-                recognitionListener(
-                    LABEL,
-                    tracker,
-                    transcript,
-                    onEnd = { endCapture("recognizer done", releaseGate = true) },
-                    onText = endpointer::onTextHeard,
-                    onRms = {
-                        levelStats.onRecognizerDb(it)
-                        openGate("recognizer up")
-                    },
-                ),
-            )
+            // Idempotent. Runs on the main thread (the recognizer needs it): on a setup failure, when the flow closes,
+            // and when the collector goes away.
+            fun cleanup() {
+                if (!cleanedUp.compareAndSet(false, true)) return
+                endCapture("flow closed", releaseGate = true)
+                io.cancel()
+                // Unblocks a writer stuck on a full pipe if the recognizer walked away. The read side is not closed
+                // after startListening: the intent is parcelled later on the main looper, and a closed descriptor
+                // fails there with "Bad file descriptor" (error 5); it is closed here, when the listen is over.
+                runCatching { writeSide?.close() }
+                runCatching { readSide?.close() }
+                recognizer?.let {
+                    runCatching { it.cancel() }
+                    runCatching { it.destroy() }
+                }
+                releaseRecord()
+                if (!readerLaunched) closeVad()
+            }
 
             try {
-                audioRecord.startRecording()
-            } catch (e: IllegalStateException) {
-                recognizer.destroy()
-                audioRecord.release()
-                readSide.close()
-                writeSide.close()
-                throw e
-            }
-            Log.i(TAG, "$LABEL +${tracker.offsetMs()}ms audio record started")
-
-            val io = CoroutineScope(Dispatchers.IO)
-            // The writer blocks on the pipe, so it runs apart from the reader: capture never waits on the recognizer.
-            val writer: Job =
-                io.launch {
-                    try {
-                        pump.run()
-                        Log.i(TAG, "$LABEL: ${pump.realBytesWritten} bytes real, ${pump.silenceBytesWritten} bytes silence piped")
-                    } catch (e: IOException) {
-                        Log.i(TAG, "$LABEL: pipe closed by the recognizer (${e.message})")
-                    }
+                if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
+                    throw IllegalStateException("AudioRecord failed to initialise (microphone busy or permission missing)")
                 }
-            io.launch {
-                val buffer = ByteArray(chunkBytes)
-                val samples = ShortArray(chunkBytes / BYTES_PER_SAMPLE)
-                val frame = ShortArray(VAD_FRAME_SAMPLES)
-                var firstLevelLogged = false
-                val vad =
+                val (read, write) = ParcelFileDescriptor.createPipe()
+                readSide = read
+                writeSide = write
+                val audioPump =
+                    AudioPump(
+                        ParcelFileDescriptor.AutoCloseOutputStream(write),
+                        idleChunkBytes = chunkBytes,
+                        pace = { delay(VAD_FRAME_MS.toLong() * FRAMES_PER_CHUNK) },
+                    )
+                pump = audioPump
+
+                val endpointer =
+                    Endpointer(
+                        frameMs = VAD_FRAME_MS,
+                        waitSilenceMs = Endpointer.waitSilenceMs(kind),
+                        endSilenceMs = Endpointer.endSilenceMs(kind),
+                    )
+                val voiceDetector =
                     VadWebRTC(
                         sampleRate = SampleRate.SAMPLE_RATE_16K,
                         frameSize = FrameSize.FRAME_SIZE_320,
@@ -161,80 +183,114 @@ class PipedSpeechToText(
                         silenceDurationMs = VAD_HANGOVER_MS, // our Endpointer owns the silence rule
                         speechDurationMs = VAD_SPEECH_MS,
                     )
-                try {
-                    while (isActive && !ended.get()) {
-                        val n = audioRecord.read(buffer, 0, buffer.size)
-                        if (n > 0) {
-                            pump.offer(buffer.copyOf(n))
-                            val count = n / BYTES_PER_SAMPLE
-                            ByteBuffer
-                                .wrap(buffer, 0, n)
-                                .order(ByteOrder.LITTLE_ENDIAN)
-                                .asShortBuffer()
-                                .get(samples, 0, count)
-                            // One level per chunk (~17/s), from the first recorded audio.
-                            val dbfs = InputLevel.rmsDbfs(samples, count)
-                            levelStats.onChunk(dbfs)
-                            trySend(SttEvent.Level(InputLevel.fromDbfs(dbfs)))
-                            if (!firstLevelLogged) {
-                                firstLevelLogged = true
-                                Log.i(TAG, "$LABEL +${tracker.offsetMs()}ms first level (ours)")
-                            }
-                            for (start in 0 until count - VAD_FRAME_SAMPLES + 1 step VAD_FRAME_SAMPLES) {
-                                samples.copyInto(frame, 0, start, start + VAD_FRAME_SAMPLES)
-                                val reason = endpointer.onFrame(vad.isSpeech(frame)) ?: continue
-                                Log.i(
-                                    TAG,
-                                    "$LABEL +${tracker.offsetMs()}ms endpoint ($reason) at audio ${endpointer.elapsedMs}ms, " +
-                                        "text heard: ${endpointer.hasHeardText}, first in session: $firstInSession",
-                                )
-                                endCapture("endpoint", releaseGate = false)
+                vad = voiceDetector
+                val speechRecognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+                recognizer = speechRecognizer
+                val transcript = SegmentedTranscript()
+                speechRecognizer.setRecognitionListener(
+                    recognitionListener(
+                        LABEL,
+                        tracker,
+                        transcript,
+                        onEnd = { endCapture("recognizer done", releaseGate = true) },
+                        onText = endpointer::onTextHeard,
+                        onRms = {
+                            levelStats.onRecognizerDb(it)
+                            openGate("recognizer up")
+                        },
+                    ),
+                )
+
+                audioRecord.startRecording()
+                Log.i(TAG, "$LABEL +${tracker.offsetMs()}ms audio record started")
+
+                // The writer blocks on the pipe, so it runs apart from the reader: capture never waits on the recognizer.
+                io.launch {
+                    try {
+                        audioPump.run()
+                        Log.i(TAG, "$LABEL: ${audioPump.realBytesWritten} bytes real, ${audioPump.silenceBytesWritten} bytes silence piped")
+                    } catch (e: IOException) {
+                        Log.i(TAG, "$LABEL: pipe closed by the recognizer (${e.message})")
+                    }
+                }
+                readerLaunched = true
+                // ATOMIC: once launched, the body (and its finally) runs even if the scope is cancelled first.
+                io.launch(start = CoroutineStart.ATOMIC) {
+                    val buffer = ByteArray(chunkBytes)
+                    val samples = ShortArray(chunkBytes / BYTES_PER_SAMPLE)
+                    val frame = ShortArray(VAD_FRAME_SAMPLES)
+                    var firstLevelLogged = false
+                    try {
+                        while (isActive && !ended.get()) {
+                            val n = audioRecord.read(buffer, 0, buffer.size)
+                            if (n > 0) {
+                                audioPump.offer(buffer.copyOf(n))
+                                val count = n / BYTES_PER_SAMPLE
+                                ByteBuffer
+                                    .wrap(buffer, 0, n)
+                                    .order(ByteOrder.LITTLE_ENDIAN)
+                                    .asShortBuffer()
+                                    .get(samples, 0, count)
+                                // One level per chunk (~17/s), from the first recorded audio.
+                                val dbfs = InputLevel.rmsDbfs(samples, count)
+                                levelStats.onChunk(dbfs)
+                                trySend(SttEvent.Level(InputLevel.fromDbfs(dbfs)))
+                                if (!firstLevelLogged) {
+                                    firstLevelLogged = true
+                                    Log.i(TAG, "$LABEL +${tracker.offsetMs()}ms first level (ours)")
+                                }
+                                for (start in 0 until count - VAD_FRAME_SAMPLES + 1 step VAD_FRAME_SAMPLES) {
+                                    samples.copyInto(frame, 0, start, start + VAD_FRAME_SAMPLES)
+                                    val reason = endpointer.onFrame(voiceDetector.isSpeech(frame)) ?: continue
+                                    Log.i(
+                                        TAG,
+                                        "$LABEL +${tracker.offsetMs()}ms endpoint ($reason) at audio ${endpointer.elapsedMs}ms, " +
+                                            "text heard: ${endpointer.hasHeardText}, listen kind: $kind",
+                                    )
+                                    endCapture("endpoint", releaseGate = false)
+                                    break
+                                }
+                            } else if (n < 0) {
+                                Log.w(TAG, "$LABEL: AudioRecord.read returned $n")
                                 break
                             }
-                        } else if (n < 0) {
-                            Log.w(TAG, "$LABEL: AudioRecord.read returned $n")
-                            break
                         }
+                    } finally {
+                        closeVad()
+                        releaseRecord()
+                        endCapture("capture stopped", releaseGate = false)
                     }
-                } finally {
-                    vad.close()
-                    runCatching { audioRecord.stop() }
-                    audioRecord.release()
-                    endCapture("capture stopped", releaseGate = false)
                 }
-            }
-            io.launch {
-                delay(GATE_TIMEOUT_MS)
-                openGate("timeout")
-            }
-            io.launch {
-                delay(maxListenMs)
-                capFired.set(true)
-                Log.w(TAG, "$LABEL +${tracker.offsetMs()}ms listen cap of ${maxListenMs}ms fired, closing the pipe")
-                endCapture("cap", releaseGate = true)
+                io.launch {
+                    delay(GATE_TIMEOUT_MS)
+                    openGate("timeout")
+                }
+                io.launch {
+                    delay(maxListenMs)
+                    capFired.set(true)
+                    Log.w(TAG, "$LABEL +${tracker.offsetMs()}ms listen cap of ${maxListenMs}ms fired, closing the pipe")
+                    endCapture("cap", releaseGate = true)
+                    // The recognizer should finish within moments of the pipe closing; if it doesn't, give up.
+                    delay(HARD_DEADLINE_MS)
+                    Log.w(TAG, "$LABEL +${tracker.offsetMs()}ms still not finished ${HARD_DEADLINE_MS}ms after the cap, failing the listen")
+                    runCatching { write.close() }
+                    close(SttException(SpeechRecognizer.ERROR_SPEECH_TIMEOUT))
+                }
+
+                speechRecognizer.startListening(
+                    recognizerIntent(expected)
+                        .putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, RecognizerIntent.EXTRA_AUDIO_SOURCE)
+                        .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, read)
+                        .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
+                        .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
+                        .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE, SAMPLE_RATE_HZ),
+                )
+            } catch (e: Throwable) {
+                cleanup()
+                throw e
             }
 
-            recognizer.startListening(
-                recognizerIntent(expected)
-                    .putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, RecognizerIntent.EXTRA_AUDIO_SOURCE)
-                    .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, readSide)
-                    .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
-                    .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
-                    .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE, SAMPLE_RATE_HZ),
-            )
-
-            awaitClose {
-                endCapture("flow closed", releaseGate = true)
-                // Unblocks a writer stuck on a full pipe if the recognizer walked away.
-                runCatching { writeSide.close() }
-                // Not closed after startListening: the intent is parcelled later on the main looper, and a closed
-                // descriptor fails there with "Bad file descriptor" (error 5).
-                runCatching { readSide.close() }
-                io.coroutineContext[Job]?.cancel()
-                writer.cancel()
-                recognizer.cancel()
-                recognizer.destroy()
-            }
+            awaitClose { cleanup() }
         }
             // Unbounded: trySend must never drop the final result behind a backlog of level events.
             .buffer(Channel.UNLIMITED)
@@ -251,6 +307,7 @@ class PipedSpeechToText(
         const val VAD_HANGOVER_MS = 20
         const val MAX_LISTEN_MS = 15_000L
         const val GATE_TIMEOUT_MS = 10_000L
+        const val HARD_DEADLINE_MS = 3_000L
         const val BYTES_PER_MS = SAMPLE_RATE_HZ * BYTES_PER_SAMPLE / 1000
     }
 }

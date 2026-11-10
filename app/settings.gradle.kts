@@ -19,11 +19,11 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        // Only for the WebRTC voice activity detector (endpointing in piped STT); nothing else may come from here.
-        maven("https://jitpack.io") {
-            content {
-                includeGroup("com.github.gkonovalov.android-vad")
-            }
+        // Only for the WebRTC voice activity detector (endpointing in piped STT): that group comes only from
+        // JitPack, and JitPack serves nothing else.
+        exclusiveContent {
+            forRepository { maven("https://jitpack.io") }
+            filter { includeGroup("com.github.gkonovalov.android-vad") }
         }
     }
 }

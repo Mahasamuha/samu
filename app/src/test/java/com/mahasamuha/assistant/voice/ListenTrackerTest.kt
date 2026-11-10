@@ -15,6 +15,12 @@ class ListenTrackerTest {
     }
 
     @Test
+    fun rescuesLastPartialOnSpeechTimeout() {
+        tracker.onPartial("what is")
+        assertEquals("what is", tracker.onError(6).rescuedText)
+    }
+
+    @Test
     fun noRescueOnNoMatchWithoutPartials() {
         assertNull(tracker.onError(7).rescuedText)
     }
@@ -36,7 +42,7 @@ class ListenTrackerTest {
     @Test
     fun otherErrorsAreNotRescued() {
         tracker.onPartial("hello")
-        listOf(1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13).forEach {
+        listOf(1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13).forEach {
             assertNull("code $it", tracker.onError(it).rescuedText)
         }
     }
