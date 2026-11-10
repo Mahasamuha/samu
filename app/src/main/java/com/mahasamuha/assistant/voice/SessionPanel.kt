@@ -45,6 +45,7 @@ import com.mahasamuha.assistant.ui.AppType
 import com.mahasamuha.assistant.ui.ChatBubble
 import com.mahasamuha.assistant.ui.GhostButton
 import com.mahasamuha.assistant.ui.Hairline
+import com.mahasamuha.assistant.ui.LevelIndicator
 import com.mahasamuha.assistant.ui.Mark
 import com.mahasamuha.assistant.ui.MonoLabel
 import com.mahasamuha.assistant.ui.PrimaryButton
@@ -111,6 +112,15 @@ fun SessionPanel(
                 }
                 // Takes the space left under the cap; scrolls once the conversation outgrows it.
                 Transcript(state, onOpenSource, Modifier.weight(1f, fill = false))
+                if (state.phase == Phase.Listening) {
+                    // Big and centred until words arrive; then small under the hearing bubble until listening ends.
+                    val transcribing = state.hearing.isNotEmpty()
+                    LevelIndicator(
+                        level = state.level,
+                        label = if (transcribing) "transcribing" else "listening",
+                        compact = transcribing,
+                    )
+                }
                 state.error?.let { error ->
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         MonoLabel("couldn't finish")

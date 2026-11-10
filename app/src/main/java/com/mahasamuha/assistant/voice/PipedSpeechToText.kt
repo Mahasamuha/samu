@@ -10,23 +10,34 @@ import android.os.SystemClock
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
+import com.konovalov.vad.webrtc.VadWebRTC
+import com.konovalov.vad.webrtc.config.FrameSize
+import com.konovalov.vad.webrtc.config.Mode
+import com.konovalov.vad.webrtc.config.SampleRate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Experiment: we own the microphone and feed the on-device recognizer through `EXTRA_AUDIO_SOURCE`, so audio
  * captured while a cold recognizer is still starting up waits in the pipe instead of being lost.
- * No VAD: the recognizer is expected to endpoint the piped audio itself; [maxListenMs] closes the pipe if it doesn't.
+ * The recognizer won't finalise piped audio until the pipe closes, and its callbacks run in processing time while it
+ * catches up, so endpointing is ours: a WebRTC VAD on the audio as recorded feeds an [Endpointer] (audio time),
+ * and an end closes the pipe. The session is segmented, so speech the recognizer split into several segments is
+ * joined. [maxListenMs] closes the pipe regardless.
  * Must be driven from the main thread.
  */
 class PipedSpeechToText(
@@ -42,7 +53,7 @@ class PipedSpeechToText(
             }
             val tracker = ListenTracker(SystemClock::elapsedRealtime)
 
-            val chunkBytes = SAMPLE_RATE_HZ * BYTES_PER_SAMPLE / CHUNKS_PER_SECOND
+            val chunkBytes = VAD_FRAME_SAMPLES * FRAMES_PER_CHUNK * BYTES_PER_SAMPLE
             val minBytes = AudioRecord.getMinBufferSize(SAMPLE_RATE_HZ, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
             val audioRecord =
                 AudioRecord(
@@ -71,7 +82,10 @@ class PipedSpeechToText(
             }
 
             val recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
-            recognizer.setRecognitionListener(recognitionListener(LABEL, tracker, onEnd = { endCapture("recognizer done") }))
+            val transcript = SegmentedTranscript()
+            recognizer.setRecognitionListener(
+                recognitionListener(LABEL, tracker, transcript, onEnd = { endCapture("recognizer done") }),
+            )
 
             try {
                 audioRecord.startRecording()
@@ -96,17 +110,44 @@ class PipedSpeechToText(
                 }
             io.launch {
                 val buffer = ByteArray(chunkBytes)
+                val samples = ShortArray(chunkBytes / BYTES_PER_SAMPLE)
+                val frame = ShortArray(VAD_FRAME_SAMPLES)
+                val endpointer = Endpointer(frameMs = VAD_FRAME_MS)
+                val vad =
+                    VadWebRTC(
+                        sampleRate = SampleRate.SAMPLE_RATE_16K,
+                        frameSize = FrameSize.FRAME_SIZE_320,
+                        mode = Mode.VERY_AGGRESSIVE,
+                        silenceDurationMs = VAD_HANGOVER_MS, // our Endpointer owns the silence rule
+                        speechDurationMs = VAD_SPEECH_MS,
+                    )
                 try {
                     while (isActive && !ended.get()) {
                         val n = audioRecord.read(buffer, 0, buffer.size)
                         if (n > 0) {
                             pump.offer(buffer.copyOf(n))
+                            val count = n / BYTES_PER_SAMPLE
+                            ByteBuffer
+                                .wrap(buffer, 0, n)
+                                .order(ByteOrder.LITTLE_ENDIAN)
+                                .asShortBuffer()
+                                .get(samples, 0, count)
+                            // One level per chunk (~17/s), from the first recorded audio.
+                            trySend(SttEvent.Level(InputLevel.fromPcm(samples, count)))
+                            for (start in 0 until count - VAD_FRAME_SAMPLES + 1 step VAD_FRAME_SAMPLES) {
+                                samples.copyInto(frame, 0, start, start + VAD_FRAME_SAMPLES)
+                                val reason = endpointer.onFrame(vad.isSpeech(frame)) ?: continue
+                                Log.i(TAG, "$LABEL +${tracker.offsetMs()}ms endpoint ($reason) at audio ${endpointer.elapsedMs}ms")
+                                endCapture("endpoint")
+                                break
+                            }
                         } else if (n < 0) {
                             Log.w(TAG, "$LABEL: AudioRecord.read returned $n")
                             break
                         }
                     }
                 } finally {
+                    vad.close()
                     runCatching { audioRecord.stop() }
                     audioRecord.release()
                     endCapture("capture stopped")
@@ -121,6 +162,7 @@ class PipedSpeechToText(
 
             recognizer.startListening(
                 recognizerIntent(expected)
+                    .putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, RecognizerIntent.EXTRA_AUDIO_SOURCE)
                     .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, readSide)
                     .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
                     .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
@@ -139,13 +181,20 @@ class PipedSpeechToText(
                 recognizer.cancel()
                 recognizer.destroy()
             }
-        }.flowOn(Dispatchers.Main)
+        }
+            // Unbounded: trySend must never drop the final result behind a backlog of level events.
+            .buffer(Channel.UNLIMITED)
+            .flowOn(Dispatchers.Main)
 
     private companion object {
         const val LABEL = "STT(piped)"
         const val SAMPLE_RATE_HZ = 16_000
         const val BYTES_PER_SAMPLE = 2
-        const val CHUNKS_PER_SECOND = 20 // 50 ms frames
+        const val VAD_FRAME_SAMPLES = 320 // 20 ms at 16 kHz, a size the WebRTC VAD accepts
+        const val VAD_FRAME_MS = 20
+        const val FRAMES_PER_CHUNK = 3 // 60 ms reads
+        const val VAD_SPEECH_MS = 50
+        const val VAD_HANGOVER_MS = 20
         const val MAX_LISTEN_MS = 15_000L
     }
 }

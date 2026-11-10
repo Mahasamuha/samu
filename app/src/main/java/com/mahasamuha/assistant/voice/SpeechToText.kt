@@ -9,9 +9,11 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ProducerScope
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
 import java.util.Locale
@@ -23,6 +25,11 @@ sealed interface SttEvent {
 
     data class Final(
         val text: String,
+    ) : SttEvent
+
+    /** Microphone loudness, normalised 0..1, for the panel's level indicator. Callers that don't show one ignore it. */
+    data class Level(
+        val value: Float,
     ) : SttEvent
 }
 
@@ -36,7 +43,7 @@ class SttException(
 class OnDeviceSttUnavailableException : Exception("On-device speech recognition is unavailable")
 
 /**
- * One utterance per [listen]: partial results, then a single [SttEvent.Final], then completion.
+ * One utterance per [listen]: [SttEvent.Level]s and partial results, then a single [SttEvent.Final], then completion.
  * [expected] are words or phrases to favor (e.g. yes/no while confirming); implementations may ignore it.
  */
 interface SpeechToText {
@@ -64,40 +71,76 @@ class PlatformSpeechToText(
                 recognizer.cancel()
                 recognizer.destroy()
             }
-        }.flowOn(Dispatchers.Main)
+        }
+            // Unbounded: trySend must never drop the final result behind a backlog of level events.
+            .buffer(Channel.UNLIMITED)
+            .flowOn(Dispatchers.Main)
 }
 
 /**
  * Listener shared by the recognizer-backed [SpeechToText] implementations: logs timings under [label],
  * forwards partials, and ends the flow on a result or error (with the last-partial fallback from [tracker]).
+ * With a [segments] transcript the session is segmented (piped audio): results are collected per segment and the
+ * flow ends with their join when the session ends; partials show the earlier segments too. The recognizer's own
+ * level callbacks are forwarded as [SttEvent.Level] only when not segmented (the piped source measures its own audio).
  * [onEnd] runs just before the flow is closed, for cleanup that must happen as soon as the recognizer is done.
  */
 internal fun ProducerScope<SttEvent>.recognitionListener(
     label: String,
     tracker: ListenTracker,
+    segments: SegmentedTranscript? = null,
     onEnd: () -> Unit = {},
 ): RecognitionListener =
     object : RecognitionListener {
         override fun onPartialResults(partialResults: Bundle) {
             firstResult(partialResults)?.let {
                 tracker.onPartial(it)?.let { ms -> Log.i(TAG, "$label +${ms}ms first partial") }
-                trySend(SttEvent.Partial(it))
+                trySend(SttEvent.Partial(segments?.onPartial(it) ?: it))
             }
         }
 
         override fun onResults(results: Bundle) {
+            if (segments != null) {
+                // Segmented sessions end in onEndOfSegmentedSession; a plain result is just one more segment.
+                addSegment(results)
+                return
+            }
             Log.i(TAG, "$label +${tracker.offsetMs()}ms final result")
             onEnd()
             trySend(SttEvent.Final(firstResult(results).orEmpty()))
             close()
         }
 
+        override fun onSegmentResults(segmentResults: Bundle) = addSegment(segmentResults)
+
+        override fun onEndOfSegmentedSession() {
+            val transcript = segments ?: return
+            Log.i(TAG, "$label +${tracker.offsetMs()}ms end of segmented session, ${transcript.segmentCount} segments")
+            onEnd()
+            trySend(SttEvent.Final(transcript.joined()))
+            close()
+        }
+
+        private fun addSegment(bundle: Bundle) {
+            val transcript = segments ?: return
+            val text = firstResult(bundle).orEmpty()
+            transcript.onSegment(text)
+            Log.i(TAG, "$label +${tracker.offsetMs()}ms segment result #${transcript.segmentCount}, ${text.length} chars")
+        }
+
         override fun onError(error: Int) {
             val outcome = tracker.onError(error)
-            Log.i(TAG, "$label +${outcome.offsetMs}ms error $error, partial used: ${outcome.rescuedText != null}")
+            // Segmented: the segments so far plus the unfinished partial, not just the last partial.
+            val rescued =
+                if (segments == null) {
+                    outcome.rescuedText
+                } else {
+                    segments.pendingText().takeIf { error == ListenTracker.ERROR_NO_MATCH && it.isNotEmpty() }
+                }
+            Log.i(TAG, "$label +${outcome.offsetMs}ms error $error, partial used: ${rescued != null}")
             onEnd()
-            if (outcome.rescuedText != null) {
-                trySend(SttEvent.Final(outcome.rescuedText))
+            if (rescued != null) {
+                trySend(SttEvent.Final(rescued))
                 close()
             } else {
                 close(SttException(error))
@@ -114,6 +157,7 @@ internal fun ProducerScope<SttEvent>.recognitionListener(
 
         override fun onRmsChanged(rmsdB: Float) {
             tracker.onLevel()?.let { ms -> Log.i(TAG, "$label +${ms}ms first level") }
+            if (segments == null) trySend(SttEvent.Level(InputLevel.fromRecognizerDb(rmsdB)))
         }
 
         override fun onBufferReceived(buffer: ByteArray?) = Unit

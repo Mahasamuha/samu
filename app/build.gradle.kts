@@ -211,6 +211,8 @@ dependencies {
     implementation(libs.androidx.savedstate.ktx)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.appauth)
+    // WebRTC VAD only (MIT): endpointing for piped STT in audio time.
+    implementation(libs.android.vad.webrtc)
     // Only for the one-tap "turn on location" dialog before navigating (plan §5a).
     implementation(libs.play.services.location)
     implementation(platform(libs.androidx.compose.bom))

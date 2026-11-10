@@ -15,6 +15,7 @@ ktlintGradle = "14.2.0"
 # The ktlint engine the Gradle plugin runs; the Compose ruleset is built against the same release.
 ktlint = "1.8.0"
 composeRules = "0.6.8"
+androidVad = "2.0.10"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -29,6 +30,7 @@ androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
 androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+android-vad-webrtc = { group = "com.github.gkonovalov.android-vad", name = "webrtc", version.ref = "androidVad" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 # Android's own org.json is a stub in JVM unit tests; this is the real implementation.
 ktlint-compose-rules = { group = "io.nlopez.compose.rules", name = "ktlint", version.ref = "composeRules" }

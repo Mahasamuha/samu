@@ -3,16 +3,20 @@ package com.mahasamuha.assistant.ui
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.StartOffset
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -24,9 +28,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
 // Phone versions of the design system's components (Button, MonoLabel, ChatBubble, status dots).
@@ -157,6 +165,46 @@ fun PulseDot(
     )
 }
 
+/**
+ * Shows the user they are being heard: a solid disc with a halo that swells with the input [level] (0..1), over a
+ * [label]. Large and centred by default; [compact] is a small disc beside the label, to sit under a transcript.
+ */
+@Composable
+fun LevelIndicator(
+    level: Float,
+    label: String,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+) {
+    val color = AppTheme.colors.status
+    val smoothed by animateFloatAsState(level, tween(LEVEL_SMOOTHING_MS), label = "level")
+    val orb = if (compact) 36.dp else 120.dp
+    val core = if (compact) 0.45f else 0.5f // the disc's share of the box; the halo grows into the rest
+    val indicator: @Composable () -> Unit = {
+        Canvas(Modifier.size(orb).semantics { contentDescription = label }) {
+            val coreRadius = size.minDimension / 2 * core
+            val haloRadius = coreRadius + (size.minDimension / 2 - coreRadius) * smoothed
+            drawCircle(color, haloRadius, alpha = HALO_ALPHA)
+            drawCircle(color, coreRadius)
+        }
+    }
+    if (compact) {
+        Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            indicator()
+            MonoLabel(label)
+        }
+    } else {
+        Column(
+            modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            indicator()
+            MonoLabel(label)
+        }
+    }
+}
+
 /** An assistant bubble with three dots fading in turn: the assistant is working on a reply. */
 @Composable
 fun TypingBubble(modifier: Modifier = Modifier) {
@@ -184,6 +232,8 @@ fun TypingBubble(modifier: Modifier = Modifier) {
 
 // Quiet, slow fades, in keeping with the design system's motion (no spinners).
 private const val PULSE_MS = 600
+private const val LEVEL_SMOOTHING_MS = 90
+private const val HALO_ALPHA = 0.3f
 
 @Composable
 fun Hairline(modifier: Modifier = Modifier) {

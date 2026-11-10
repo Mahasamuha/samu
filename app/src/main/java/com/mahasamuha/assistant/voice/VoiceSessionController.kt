@@ -41,6 +41,8 @@ data class PanelState(
     val transcript: List<PanelMessage> = emptyList(),
     /** Words recognized so far while the user speaks; moves into [transcript] when they finish. */
     val hearing: String = "",
+    /** Input loudness 0..1 while listening, for the level indicator; 0 otherwise. */
+    val level: Float = 0f,
     val error: String? = null,
     /** An action waiting on the user: shown with Confirm/Cancel (ask) or just Cancel (announce). */
     val confirming: Confirmation? = null,
@@ -210,21 +212,36 @@ class VoiceSessionController(
     }
 
     private suspend fun hear(expected: List<String> = emptyList()): String {
-        _state.update { it.copy(phase = PanelState.Phase.Listening) }
+        _state.update { it.copy(phase = PanelState.Phase.Listening, level = 0f) }
         var final = ""
+        try {
+            collectHeard(expected) { final = it }
+        } finally {
+            _state.update { it.copy(level = 0f) }
+        }
+        return final
+    }
+
+    private suspend fun collectHeard(
+        expected: List<String>,
+        onFinal: (String) -> Unit,
+    ) {
         stt.listen(expected).collect { event ->
             when (event) {
+                is SttEvent.Level -> {
+                    _state.update { it.copy(level = event.value) }
+                }
+
                 is SttEvent.Partial -> {
                     _state.update { it.copy(hearing = event.text) }
                 }
 
                 is SttEvent.Final -> {
-                    final = event.text
+                    onFinal(event.text)
                     _state.update { it.copy(hearing = event.text) }
                 }
             }
         }
-        return final
     }
 
     /**
