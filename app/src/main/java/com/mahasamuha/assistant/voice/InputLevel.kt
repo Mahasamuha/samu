@@ -7,7 +7,7 @@ import kotlin.math.sqrt
 object InputLevel {
     private const val FLOOR_DBFS = -60.0
     private const val CEILING_DBFS = -25.0
-    const val SILENCE_DBFS = -120.0
+    private const val SILENCE_DBFS = -120.0
     private const val FULL_SCALE = 32_768.0
 
     // The recognizer's rmsdB is roughly -2 (silence) to 10 (loud).
@@ -26,12 +26,6 @@ object InputLevel {
         if (rms <= 0.0) return SILENCE_DBFS
         return maxOf(20 * log10(rms / FULL_SCALE), SILENCE_DBFS)
     }
-
-    /** Level of 16-bit PCM [samples] (first [count] of them): RMS in dBFS mapped to 0..1. Silence is 0. */
-    fun fromPcm(
-        samples: ShortArray,
-        count: Int = samples.size,
-    ): Float = fromDbfs(rmsDbfs(samples, count))
 
     /** Maps a dBFS value onto 0..1 over the floor..ceiling range. */
     fun fromDbfs(dbfs: Double): Float = ((dbfs - FLOOR_DBFS) / (CEILING_DBFS - FLOOR_DBFS)).toFloat().coerceIn(0f, 1f)

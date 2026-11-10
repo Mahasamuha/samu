@@ -1,49 +1,24 @@
 package com.mahasamuha.assistant.voice
 
-/** What to do with a recognizer error: [rescuedText] is the last partial to use as the final result, if any. */
-data class ListenErrorOutcome(
-    val offsetMs: Long,
-    val rescuedText: String?,
-)
+import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Timing and fallback state for one listen; no Android dependencies. Created when listening starts.
- * Offsets are milliseconds since creation, read from [clock].
- * A cold on-device recognizer can deliver partials and then end with "no match"; the last partial is kept for that case.
+ * Clock for one listen's log lines; no Android dependencies. Created when listening starts.
+ * Offsets are milliseconds since creation, read from [clock]; [label] prefixes every line.
+ * [isFirst] backs the "first partial", "first level" lines (it may be called from any thread).
  */
 class ListenTracker(
+    private val label: String,
     private val clock: () -> Long,
 ) {
     private val startMs = clock()
-    private var firstPartialSeen = false
-    private var firstLevelSeen = false
-    private var lastPartial: String? = null
+    private val seen = ConcurrentHashMap.newKeySet<String>()
 
     fun offsetMs(): Long = clock() - startMs
 
-    /** Returns the offset of the first non-blank partial, or null for blank and later ones. */
-    fun onPartial(text: String): Long? {
-        if (text.isBlank()) return null
-        lastPartial = text
-        if (firstPartialSeen) return null
-        firstPartialSeen = true
-        return offsetMs()
-    }
+    /** [message] prefixed with the label and the offset, e.g. `STT +340ms ready`. */
+    fun stamp(message: String): String = "$label +${offsetMs()}ms $message"
 
-    /** Returns the offset of the first input-level reading, or null for later ones. */
-    fun onLevel(): Long? {
-        if (firstLevelSeen) return null
-        firstLevelSeen = true
-        return offsetMs()
-    }
-
-    fun onError(code: Int): ListenErrorOutcome = ListenErrorOutcome(offsetMs(), lastPartial.takeIf { isNoSpeech(code) })
-
-    /** Mirrors `SpeechRecognizer.ERROR_SPEECH_TIMEOUT` and `ERROR_NO_MATCH`, kept here so this class stays off Android. */
-    companion object {
-        const val ERROR_SPEECH_TIMEOUT = 6
-        const val ERROR_NO_MATCH = 7
-
-        fun isNoSpeech(code: Int) = code == ERROR_SPEECH_TIMEOUT || code == ERROR_NO_MATCH
-    }
+    /** True the first time it is called for [event], false after that. */
+    fun isFirst(event: String): Boolean = seen.add(event)
 }

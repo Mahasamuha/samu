@@ -5,11 +5,11 @@ import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
-import android.util.Log
 import com.konovalov.vad.webrtc.VadWebRTC
 import com.konovalov.vad.webrtc.config.FrameSize
 import com.konovalov.vad.webrtc.config.Mode
@@ -21,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ProducerScope
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -43,8 +44,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * joined. [maxListenMs] closes the pipe regardless.
  * A cold recognizer seems to discard audio older than a short window while its engine initialises, so until its
  * first level callback ("recognizer up") the pipe carries paced silence and the real audio waits in the pump's
- * queue; then the queue is sent from the first frame. After [GATE_TIMEOUT_MS] without that signal, or at the end
- * of the listen, the gate opens anyway.
+ * queue; then the queue is sent from the first frame. The gate opens on that signal or after [GATE_TIMEOUT_MS]
+ * without it. An endpoint does not release it; the recognizer ending, the listen cap, or the flow closing do.
  * Must be driven from the main thread.
  */
 class PipedSpeechToText(
@@ -57,11 +58,11 @@ class PipedSpeechToText(
         kind: ListenKind,
     ): Flow<SttEvent> =
         callbackFlow {
+            val tracker = ListenTracker(LABEL, SystemClock::elapsedRealtime)
             if (!SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
-                Log.w(TAG, "$LABEL: on-device recognition unavailable")
+                tracker.logWarning("on-device recognition unavailable")
                 throw OnDeviceSttUnavailableException()
             }
-            val tracker = ListenTracker(SystemClock::elapsedRealtime)
 
             val chunkBytes = VAD_FRAME_SAMPLES * FRAMES_PER_CHUNK * BYTES_PER_SAMPLE
             val minBytes = AudioRecord.getMinBufferSize(SAMPLE_RATE_HZ, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
@@ -76,7 +77,6 @@ class PipedSpeechToText(
 
             // Everything below this point is torn down by cleanup(), which can run from several places and must be
             // safe to repeat; the resources it frees are created one by one inside the try further down.
-            val capFired = AtomicBoolean(false)
             val ended = AtomicBoolean(false)
             val cleanedUp = AtomicBoolean(false)
             val recordReleased = AtomicBoolean(false)
@@ -94,7 +94,7 @@ class PipedSpeechToText(
                 CoroutineScope(
                     Dispatchers.IO + SupervisorJob() +
                         CoroutineExceptionHandler { _, e ->
-                            Log.w(TAG, "$LABEL: unexpected failure on the io scope", e)
+                            tracker.logWarning("unexpected failure on the io scope", e)
                             close(e)
                         },
                 )
@@ -117,7 +117,7 @@ class PipedSpeechToText(
             fun openGate(reason: String) {
                 val queued = pump?.openGate() ?: return
                 val queuedMs = queued / BYTES_PER_MS
-                Log.i(TAG, "$LABEL +${tracker.offsetMs()}ms gate open ($reason), $queuedMs ms of real audio queued")
+                tracker.log("gate open ($reason), $queuedMs ms of real audio queued")
             }
 
             // Safe from any thread and idempotent. The reader loop notices the flag and releases the AudioRecord.
@@ -131,8 +131,8 @@ class PipedSpeechToText(
                 if (releaseGate) openGate(reason)
                 if (!ended.compareAndSet(false, true)) return
                 pump?.finish()
-                Log.i(TAG, "$LABEL +${tracker.offsetMs()}ms capture ended ($reason), cap fired: ${capFired.get()}")
-                Log.i(TAG, "$LABEL ${levelStats.summary()}")
+                tracker.log("capture ended ($reason)")
+                tracker.log(levelStats.summary())
             }
 
             // Idempotent. Runs on the main thread (the recognizer needs it): on a setup failure, when the flow closes,
@@ -177,6 +177,7 @@ class PipedSpeechToText(
                     )
                 val voiceDetector =
                     VadWebRTC(
+                        // Must match SAMPLE_RATE_HZ and VAD_FRAME_SAMPLES; the library only takes these enums.
                         sampleRate = SampleRate.SAMPLE_RATE_16K,
                         frameSize = FrameSize.FRAME_SIZE_320,
                         mode = Mode.VERY_AGGRESSIVE,
@@ -186,12 +187,10 @@ class PipedSpeechToText(
                 vad = voiceDetector
                 val speechRecognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
                 recognizer = speechRecognizer
-                val transcript = SegmentedTranscript()
                 speechRecognizer.setRecognitionListener(
-                    recognitionListener(
-                        LABEL,
+                    SegmentedListener(
+                        this,
                         tracker,
-                        transcript,
                         onEnd = { endCapture("recognizer done", releaseGate = true) },
                         onText = endpointer::onTextHeard,
                         onRms = {
@@ -202,15 +201,15 @@ class PipedSpeechToText(
                 )
 
                 audioRecord.startRecording()
-                Log.i(TAG, "$LABEL +${tracker.offsetMs()}ms audio record started")
+                tracker.log("audio record started")
 
                 // The writer blocks on the pipe, so it runs apart from the reader: capture never waits on the recognizer.
                 io.launch {
                     try {
                         audioPump.run()
-                        Log.i(TAG, "$LABEL: ${audioPump.realBytesWritten} bytes real, ${audioPump.silenceBytesWritten} bytes silence piped")
+                        tracker.log("${audioPump.realBytesWritten} bytes real, ${audioPump.silenceBytesWritten} bytes silence piped")
                     } catch (e: IOException) {
-                        Log.i(TAG, "$LABEL: pipe closed by the recognizer (${e.message})")
+                        tracker.log("pipe closed by the recognizer (${e.message})")
                     }
                 }
                 readerLaunched = true
@@ -219,7 +218,6 @@ class PipedSpeechToText(
                     val buffer = ByteArray(chunkBytes)
                     val samples = ShortArray(chunkBytes / BYTES_PER_SAMPLE)
                     val frame = ShortArray(VAD_FRAME_SAMPLES)
-                    var firstLevelLogged = false
                     try {
                         while (isActive && !ended.get()) {
                             val n = audioRecord.read(buffer, 0, buffer.size)
@@ -235,23 +233,19 @@ class PipedSpeechToText(
                                 val dbfs = InputLevel.rmsDbfs(samples, count)
                                 levelStats.onChunk(dbfs)
                                 trySend(SttEvent.Level(InputLevel.fromDbfs(dbfs)))
-                                if (!firstLevelLogged) {
-                                    firstLevelLogged = true
-                                    Log.i(TAG, "$LABEL +${tracker.offsetMs()}ms first level (ours)")
-                                }
+                                tracker.logFirst("own level")
                                 for (start in 0 until count - VAD_FRAME_SAMPLES + 1 step VAD_FRAME_SAMPLES) {
                                     samples.copyInto(frame, 0, start, start + VAD_FRAME_SAMPLES)
                                     val reason = endpointer.onFrame(voiceDetector.isSpeech(frame)) ?: continue
-                                    Log.i(
-                                        TAG,
-                                        "$LABEL +${tracker.offsetMs()}ms endpoint ($reason) at audio ${endpointer.elapsedMs}ms, " +
+                                    tracker.log(
+                                        "endpoint ($reason) at audio ${endpointer.elapsedMs}ms, " +
                                             "text heard: ${endpointer.hasHeardText}, listen kind: $kind",
                                     )
                                     endCapture("endpoint", releaseGate = false)
                                     break
                                 }
                             } else if (n < 0) {
-                                Log.w(TAG, "$LABEL: AudioRecord.read returned $n")
+                                tracker.logWarning("AudioRecord.read returned $n")
                                 break
                             }
                         }
@@ -267,12 +261,11 @@ class PipedSpeechToText(
                 }
                 io.launch {
                     delay(maxListenMs)
-                    capFired.set(true)
-                    Log.w(TAG, "$LABEL +${tracker.offsetMs()}ms listen cap of ${maxListenMs}ms fired, closing the pipe")
+                    tracker.logWarning("listen cap of ${maxListenMs}ms fired, closing the pipe")
                     endCapture("cap", releaseGate = true)
                     // The recognizer should finish within moments of the pipe closing; if it doesn't, give up.
                     delay(HARD_DEADLINE_MS)
-                    Log.w(TAG, "$LABEL +${tracker.offsetMs()}ms still not finished ${HARD_DEADLINE_MS}ms after the cap, failing the listen")
+                    tracker.logWarning("still not finished ${HARD_DEADLINE_MS}ms after the cap, failing the listen")
                     runCatching { write.close() }
                     close(SttException(SpeechRecognizer.ERROR_SPEECH_TIMEOUT))
                 }
@@ -300,8 +293,8 @@ class PipedSpeechToText(
         const val LABEL = "STT(piped)"
         const val SAMPLE_RATE_HZ = 16_000
         const val BYTES_PER_SAMPLE = 2
-        const val VAD_FRAME_SAMPLES = 320 // 20 ms at 16 kHz, a size the WebRTC VAD accepts
         const val VAD_FRAME_MS = 20
+        const val VAD_FRAME_SAMPLES = SAMPLE_RATE_HZ * VAD_FRAME_MS / 1000 // 320; must match the VadWebRTC enums below
         const val FRAMES_PER_CHUNK = 3 // 60 ms reads
         const val VAD_SPEECH_MS = 50
         const val VAD_HANGOVER_MS = 20
@@ -310,4 +303,50 @@ class PipedSpeechToText(
         const val HARD_DEADLINE_MS = 3_000L
         const val BYTES_PER_MS = SAMPLE_RATE_HZ * BYTES_PER_SAMPLE / 1000
     }
+}
+
+/**
+ * Listener for [PipedSpeechToText]: the on-device recognizer runs a segmented session, so results arrive per segment
+ * and the flow ends with their join when the session ends (or with the segments so far plus the unfinished partial
+ * after a no-speech error). Partials show the earlier segments too. The recognizer's own levels are not forwarded
+ * (the piped source measures its own audio); [onRms] gets them instead, along with [onText] on the first
+ * non-blank partial or segment and [onEnd] when the recognizer is done. All run on the main thread.
+ */
+internal class SegmentedListener(
+    events: ProducerScope<SttEvent>,
+    tracker: ListenTracker,
+    private val onText: () -> Unit,
+    onEnd: () -> Unit,
+    private val onRms: (Float) -> Unit,
+) : SttListener(events, tracker, onEnd) {
+    private val transcript = SegmentedTranscript()
+
+    override fun pendingText() = transcript.pendingText()
+
+    override fun onPartialResults(partialResults: Bundle) {
+        firstResult(partialResults)?.let {
+            tracker.logFirst("partial")
+            onText()
+            send(SttEvent.Partial(transcript.onPartial(it)))
+        }
+    }
+
+    // Segmented sessions end in onEndOfSegmentedSession; a plain result is just one more segment.
+    override fun onResults(results: Bundle) = addSegment(results)
+
+    override fun onSegmentResults(segmentResults: Bundle) = addSegment(segmentResults)
+
+    override fun onEndOfSegmentedSession() {
+        tracker.log("end of segmented session, ${transcript.segmentCount} segments")
+        finish(transcript.joined())
+    }
+
+    private fun addSegment(bundle: Bundle) {
+        val text = firstResult(bundle).orEmpty()
+        transcript.onSegment(text)
+        if (text.isNotBlank()) onText()
+        tracker.log("segment result #${transcript.segmentCount}, ${text.length} chars")
+    }
+
+    override fun onRecognizerLevel(rmsdB: Float) = onRms(rmsdB)
 }

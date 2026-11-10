@@ -9,7 +9,9 @@ enum class EndReason { Silence, NoSpeech }
  * VAD also flags noise, so it only measures silence.
  * - Before any text: ends after [waitSilenceMs] of continuous non-speech (reset by VAD speech). A cold engine may
  *   need that long to produce its first words, and closing the pipe is safe: the recognizer finishes queued audio.
- * - After text: ends after [endSilenceMs] of continuous non-speech.
+ * - After text: ends after [endSilenceMs] of continuous non-speech. The run is not restarted when text arrives, so
+ *   silence from before the first text counts toward it: the recognizer lags the audio, and a pause that began
+ *   before its first words showed up may already be long enough to end the utterance.
  * Reports the end once; later frames return null. No Android or library types.
  */
 class Endpointer(

@@ -3,7 +3,7 @@ package com.mahasamuha.assistant.voice
 import kotlin.math.ceil
 
 /**
- * Level statistics for one listen, for calibrating the indicator: our own PCM chunk levels in dBFS (peak and a
+ * Calibration diagnostics, not used for any decision: level statistics for one listen, for tuning the indicator: our own PCM chunk levels in dBFS (peak and a
  * percentile) and the recognizer's own `onRmsChanged` range. A listen is a few hundred chunks, so values are kept.
  * Chunk levels come from the capture thread and recognizer levels from main; [summary] is called after both stop.
  */

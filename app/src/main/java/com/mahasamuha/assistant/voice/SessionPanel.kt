@@ -66,16 +66,13 @@ fun SessionPanel(
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
-    // Listening and words have started arriving.
-    val transcribing = state.phase == Phase.Listening && state.hearing.isNotEmpty()
     // The warm-up indicator waits a moment, so a warm start (engine up almost at once) never flashes it.
     var warmupDelayPassed by remember(state.listenId) { mutableStateOf(false) }
     LaunchedEffect(state.listenId) {
         delay(WARMUP_INDICATOR_DELAY_MS)
         warmupDelayPassed = true
     }
-    val showWarmup = showWarmupIndicator(state, warmupDelayPassed)
-    val heardLive = state.phase == Phase.Listening && state.engineUp && !transcribing
+    val stage = listenStage(state, warmupDelayPassed)
     BoxWithConstraints(
         modifier =
             modifier
@@ -116,7 +113,7 @@ fun SessionPanel(
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     // Pulses while the assistant is busy or listening, so a wait never looks like nothing is happening.
                     // While words are arriving the pulser follows the input level instead.
-                    if (transcribing || heardLive) {
+                    if (stage == ListenStage.Transcribing || stage == ListenStage.Hearing) {
                         LevelDot(level = state.level)
                     } else {
                         PulseDot(
@@ -124,13 +121,13 @@ fun SessionPanel(
                             color = if (state.phase == Phase.Idle) colors.textMuted else colors.status,
                         )
                     }
-                    MonoLabel("samu · ${statusText(state, transcribing)}", modifier = Modifier.weight(1f))
+                    MonoLabel("samu · ${statusText(state, stage)}", modifier = Modifier.weight(1f))
                     Mark(size = 32.dp)
                 }
                 // Takes the space left under the cap; scrolls once the conversation outgrows it.
                 Transcript(state, onOpenSource, Modifier.weight(1f, fill = false))
                 // Big and centred only while the speech engine is still warming up; then the header takes over.
-                if (showWarmup) {
+                if (stage == ListenStage.Warmup) {
                     LevelIndicator(level = state.level, label = "listening")
                 }
                 state.error?.let { error ->
@@ -320,18 +317,18 @@ private fun ConfirmationCard(
 
 private fun statusText(
     state: PanelState,
-    transcribing: Boolean,
+    stage: ListenStage?,
 ): String =
     when {
-        transcribing -> {
+        stage == ListenStage.Transcribing -> {
             "transcribing"
         }
 
-        state.phase == Phase.Listening && state.engineUp && state.confirming == null -> {
+        stage == ListenStage.Hearing && state.confirming == null -> {
             "listening"
         }
 
-        state.confirming is Confirmation.Ask && state.phase == Phase.Listening -> {
+        stage != null && state.confirming is Confirmation.Ask -> {
             "say yes or no"
         }
 
@@ -349,8 +346,30 @@ private fun statusText(
 /** How long a listen must have run, with the engine still down, before the centre indicator appears. */
 internal const val WARMUP_INDICATOR_DELAY_MS = 300L
 
-/** The centre indicator: listening, no text yet, engine not up, and [delayPassed] since the listen started. */
-internal fun showWarmupIndicator(
+/** Where a listen is, from the panel's point of view. */
+internal enum class ListenStage {
+    /** Engine not up, and the warm-up delay has not passed: nothing extra is shown yet. */
+    Waiting,
+
+    /** Engine not up for longer than the delay: the big centre indicator shows. */
+    Warmup,
+
+    /** Engine up, no words yet. */
+    Hearing,
+
+    /** Words are arriving. */
+    Transcribing,
+}
+
+/** The listen stage, or null when not listening. [delayPassed]: [WARMUP_INDICATOR_DELAY_MS] since the listen began. */
+internal fun listenStage(
     state: PanelState,
     delayPassed: Boolean,
-): Boolean = state.phase == Phase.Listening && state.hearing.isEmpty() && !state.engineUp && delayPassed
+): ListenStage? =
+    when {
+        state.phase != Phase.Listening -> null
+        state.hearing.isNotEmpty() -> ListenStage.Transcribing
+        state.engineUp -> ListenStage.Hearing
+        delayPassed -> ListenStage.Warmup
+        else -> ListenStage.Waiting
+    }

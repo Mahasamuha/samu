@@ -203,8 +203,7 @@ class VoiceSessionController(
             Log.w(TAG, "Turn failed: $message", e)
             _state.update { it.copy(phase = PanelState.Phase.Idle, hearing = "", error = message) }
             try {
-                hasSpoken = true
-                speaker.speak(message)
+                speak(message)
             } catch (speakError: Exception) {
                 Log.w(TAG, "Couldn't speak the error", speakError)
             }
@@ -223,21 +222,19 @@ class VoiceSessionController(
         expected: List<String> = emptyList(),
         kind: ListenKind = if (hasSpoken) ListenKind.Reply else ListenKind.First,
     ): String {
-        _state.update { it.copy(phase = PanelState.Phase.Listening, level = 0f, engineUp = false, listenId = it.listenId + 1) }
-        var final = ""
+        _state.update { it.copy(phase = PanelState.Phase.Listening, engineUp = false, listenId = it.listenId + 1) }
         try {
-            collectHeard(expected, kind) { final = it }
+            return collectHeard(expected, kind)
         } finally {
             _state.update { it.copy(level = 0f) }
         }
-        return final
     }
 
     private suspend fun collectHeard(
         expected: List<String>,
         kind: ListenKind,
-        onFinal: (String) -> Unit,
-    ) {
+    ): String {
+        var final = ""
         stt.listen(expected, kind).collect { event ->
             when (event) {
                 is SttEvent.Level -> {
@@ -253,11 +250,12 @@ class VoiceSessionController(
                 }
 
                 is SttEvent.Final -> {
-                    onFinal(event.text)
+                    final = event.text
                     _state.update { it.copy(hearing = event.text) }
                 }
             }
         }
+        return final
     }
 
     /**
@@ -432,8 +430,12 @@ class VoiceSessionController(
 
     private suspend fun speakSentence(sentence: String) {
         _state.update { it.copy(phase = PanelState.Phase.Speaking) }
+        speak(sentence)
+    }
+
+    private suspend fun speak(text: String) {
         hasSpoken = true
-        speaker.speak(sentence)
+        speaker.speak(text)
     }
 
     private companion object {

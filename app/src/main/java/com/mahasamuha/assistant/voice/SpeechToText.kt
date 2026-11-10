@@ -39,6 +39,7 @@ sealed interface SttEvent {
 class SttException(
     val code: Int,
 ) : Exception("Speech recognition error $code") {
+    /** The recognizer heard nothing it could match. The one definition of "no speech" (a rescuable, quiet failure). */
     val noSpeech get() = code == SpeechRecognizer.ERROR_NO_MATCH || code == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
 }
 
@@ -70,14 +71,14 @@ class PlatformSpeechToText(
         kind: ListenKind,
     ): Flow<SttEvent> =
         callbackFlow {
+            val tracker = ListenTracker("STT", SystemClock::elapsedRealtime)
             if (!SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
-                Log.w(TAG, "STT: on-device recognition unavailable")
+                tracker.logWarning("on-device recognition unavailable")
                 throw OnDeviceSttUnavailableException()
             }
             val recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
-            val tracker = ListenTracker(SystemClock::elapsedRealtime)
 
-            recognizer.setRecognitionListener(recognitionListener("STT", tracker))
+            recognizer.setRecognitionListener(PlainListener(this, tracker))
 
             recognizer.startListening(recognizerIntent(expected))
 
@@ -91,116 +92,107 @@ class PlatformSpeechToText(
             .flowOn(Dispatchers.Main)
 }
 
+/** Logs [message] with the listen's label and the time since it started. */
+internal fun ListenTracker.log(message: String) {
+    Log.i(TAG, stamp(message))
+}
+
+internal fun ListenTracker.logWarning(
+    message: String,
+    cause: Throwable? = null,
+) {
+    Log.w(TAG, stamp(message), cause)
+}
+
+/** Logs "first [event]" the first time it is called for that [event]; returns whether it was the first. */
+internal fun ListenTracker.logFirst(event: String): Boolean = isFirst(event).also { if (it) log("first $event") }
+
 /**
- * Listener shared by the recognizer-backed [SpeechToText] implementations: logs timings under [label],
- * forwards partials, and ends the flow on a result or error (with the last-partial fallback from [tracker]).
- * With a [segments] transcript the session is segmented (piped audio): results are collected per segment and the
- * flow ends with their join when the session ends; partials show the earlier segments too. The recognizer's own
- * level callbacks are forwarded as [SttEvent.Level] only when not segmented (the piped source measures its own audio).
+ * What the recognizer-backed listeners share: timing logs, [SttEvent.EngineUp] on the first level callback, and
+ * ending the flow when the recognizer errors. A no-speech error ([SttException.noSpeech]) with [pendingText]
+ * available ends in a [SttEvent.Final] of that text; any other error fails the flow with an [SttException].
  * [onEnd] runs just before the flow is closed, for cleanup that must happen as soon as the recognizer is done.
- * [onText] runs on the first non-blank partial or segment (any thread's worth of care is the caller's).
- * The first `onRmsChanged` also sends [SttEvent.EngineUp]. [onRms] runs on every `onRmsChanged` (main thread), after the first-level log.
  */
-internal fun ProducerScope<SttEvent>.recognitionListener(
-    label: String,
-    tracker: ListenTracker,
-    segments: SegmentedTranscript? = null,
-    onEnd: () -> Unit = {},
-    onText: () -> Unit = {},
-    onRms: (Float) -> Unit = {},
-): RecognitionListener =
-    object : RecognitionListener {
-        private var engineUp = false
+internal abstract class SttListener(
+    private val events: ProducerScope<SttEvent>,
+    protected val tracker: ListenTracker,
+    private val onEnd: () -> Unit = {},
+) : RecognitionListener {
+    /** The text to fall back on when the recognizer ends without a result; blank when there is none. */
+    protected abstract fun pendingText(): String
 
-        override fun onPartialResults(partialResults: Bundle) {
-            firstResult(partialResults)?.let {
-                tracker.onPartial(it)?.let { ms -> Log.i(TAG, "$label +${ms}ms first partial") }
-                onText()
-                trySend(SttEvent.Partial(segments?.onPartial(it) ?: it))
-            }
-        }
+    /** Runs on every `onRmsChanged` (main thread), after the first-level handling. */
+    protected open fun onRecognizerLevel(rmsdB: Float) = Unit
 
-        override fun onResults(results: Bundle) {
-            if (segments != null) {
-                // Segmented sessions end in onEndOfSegmentedSession; a plain result is just one more segment.
-                addSegment(results)
-                return
-            }
-            Log.i(TAG, "$label +${tracker.offsetMs()}ms final result")
-            onEnd()
-            trySend(SttEvent.Final(firstResult(results).orEmpty()))
-            close()
-        }
-
-        override fun onSegmentResults(segmentResults: Bundle) = addSegment(segmentResults)
-
-        override fun onEndOfSegmentedSession() {
-            val transcript = segments ?: return
-            Log.i(TAG, "$label +${tracker.offsetMs()}ms end of segmented session, ${transcript.segmentCount} segments")
-            onEnd()
-            trySend(SttEvent.Final(transcript.joined()))
-            close()
-        }
-
-        private fun addSegment(bundle: Bundle) {
-            val transcript = segments ?: return
-            val text = firstResult(bundle).orEmpty()
-            transcript.onSegment(text)
-            if (text.isNotBlank()) onText()
-            Log.i(TAG, "$label +${tracker.offsetMs()}ms segment result #${transcript.segmentCount}, ${text.length} chars")
-        }
-
-        override fun onError(error: Int) {
-            val outcome = tracker.onError(error)
-            // Segmented: the segments so far plus the unfinished partial, not just the last partial.
-            val rescued =
-                if (segments == null) {
-                    outcome.rescuedText
-                } else {
-                    segments.pendingText().takeIf { ListenTracker.isNoSpeech(error) && it.isNotEmpty() }
-                }
-            Log.i(TAG, "$label +${outcome.offsetMs}ms error $error, partial used: ${rescued != null}")
-            onEnd()
-            if (rescued != null) {
-                trySend(SttEvent.Final(rescued))
-                close()
-            } else {
-                close(SttException(error))
-            }
-        }
-
-        override fun onReadyForSpeech(params: Bundle?) {
-            Log.i(TAG, "$label +${tracker.offsetMs()}ms ready")
-        }
-
-        override fun onBeginningOfSpeech() {
-            Log.i(TAG, "$label +${tracker.offsetMs()}ms beginning of speech")
-        }
-
-        override fun onRmsChanged(rmsdB: Float) {
-            tracker.onLevel()?.let { ms ->
-                val what = if (segments == null) "first level" else "recognizer up (first rms)"
-                Log.i(TAG, "$label +${ms}ms $what")
-            }
-            if (!engineUp) {
-                engineUp = true
-                trySend(SttEvent.EngineUp)
-            }
-            onRms(rmsdB)
-            if (segments == null) trySend(SttEvent.Level(InputLevel.fromRecognizerDb(rmsdB)))
-        }
-
-        override fun onBufferReceived(buffer: ByteArray?) = Unit
-
-        override fun onEndOfSpeech() {
-            Log.i(TAG, "$label +${tracker.offsetMs()}ms end of speech")
-        }
-
-        override fun onEvent(
-            eventType: Int,
-            params: Bundle?,
-        ) = Unit
+    protected fun send(event: SttEvent) {
+        events.trySend(event)
     }
+
+    /** Ends the flow with [text] as the final result. */
+    protected fun finish(text: String) {
+        onEnd()
+        events.trySend(SttEvent.Final(text))
+        events.close()
+    }
+
+    override fun onError(error: Int) {
+        val failure = SttException(error)
+        val rescued = pendingText().takeIf { failure.noSpeech && it.isNotEmpty() }
+        tracker.log("error $error, partial used: ${rescued != null}")
+        if (rescued != null) {
+            finish(rescued)
+        } else {
+            onEnd()
+            events.close(failure)
+        }
+    }
+
+    override fun onReadyForSpeech(params: Bundle?) = tracker.log("ready")
+
+    override fun onBeginningOfSpeech() = tracker.log("beginning of speech")
+
+    override fun onEndOfSpeech() = tracker.log("end of speech")
+
+    override fun onRmsChanged(rmsdB: Float) {
+        if (tracker.logFirst("recognizer level")) send(SttEvent.EngineUp)
+        onRecognizerLevel(rmsdB)
+    }
+
+    override fun onBufferReceived(buffer: ByteArray?) = Unit
+
+    override fun onEvent(
+        eventType: Int,
+        params: Bundle?,
+    ) = Unit
+}
+
+/**
+ * Listener for [PlatformSpeechToText]: one result per listen. Partials are forwarded, the last one stands in for
+ * the result when the recognizer ends with no match, and the recognizer's own levels become [SttEvent.Level].
+ */
+private class PlainListener(
+    events: ProducerScope<SttEvent>,
+    tracker: ListenTracker,
+) : SttListener(events, tracker) {
+    private var lastPartial = ""
+
+    override fun pendingText() = lastPartial
+
+    override fun onPartialResults(partialResults: Bundle) {
+        firstResult(partialResults)?.let {
+            tracker.logFirst("partial")
+            lastPartial = it
+            send(SttEvent.Partial(it))
+        }
+    }
+
+    override fun onResults(results: Bundle) {
+        tracker.log("final result")
+        finish(firstResult(results).orEmpty())
+    }
+
+    override fun onRecognizerLevel(rmsdB: Float) = send(SttEvent.Level(InputLevel.fromRecognizerDb(rmsdB)))
+}
 
 /** The intent both implementations start the recognizer with. */
 internal fun recognizerIntent(expected: List<String>): Intent =
@@ -213,5 +205,5 @@ internal fun recognizerIntent(expected: List<String>): Intent =
             if (expected.isNotEmpty()) putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, ArrayList(expected))
         }
 
-private fun firstResult(bundle: Bundle): String? =
+internal fun firstResult(bundle: Bundle): String? =
     bundle.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.takeIf { it.isNotBlank() }

@@ -1,82 +1,32 @@
 package com.mahasamuha.assistant.voice
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ListenTrackerTest {
     private var now = 1_000L
-    private val tracker = ListenTracker { now }
-
-    @Test
-    fun rescuesLastPartialOnNoMatch() {
-        tracker.onPartial("what is")
-        assertEquals("what is", tracker.onError(7).rescuedText)
-    }
-
-    @Test
-    fun rescuesLastPartialOnSpeechTimeout() {
-        tracker.onPartial("what is")
-        assertEquals("what is", tracker.onError(6).rescuedText)
-    }
-
-    @Test
-    fun noRescueOnNoMatchWithoutPartials() {
-        assertNull(tracker.onError(7).rescuedText)
-    }
-
-    @Test
-    fun blankPartialsAreIgnored() {
-        tracker.onPartial("")
-        tracker.onPartial("   ")
-        assertNull(tracker.onError(7).rescuedText)
-    }
-
-    @Test
-    fun blankPartialDoesNotReplaceEarlierOne() {
-        tracker.onPartial("hello")
-        tracker.onPartial(" ")
-        assertEquals("hello", tracker.onError(7).rescuedText)
-    }
-
-    @Test
-    fun otherErrorsAreNotRescued() {
-        tracker.onPartial("hello")
-        listOf(1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13).forEach {
-            assertNull("code $it", tracker.onError(it).rescuedText)
-        }
-    }
-
-    @Test
-    fun lastPartialWins() {
-        tracker.onPartial("what")
-        tracker.onPartial("what is the")
-        tracker.onPartial("what is the weather")
-        assertEquals("what is the weather", tracker.onError(7).rescuedText)
-    }
+    private val tracker = ListenTracker("STT") { now }
 
     @Test
     fun offsetsComeFromTheInjectedClock() {
         now = 1_340
         assertEquals(340L, tracker.offsetMs())
         now = 2_000
-        assertEquals(1_000L, tracker.onError(3).offsetMs)
+        assertEquals(1_000L, tracker.offsetMs())
     }
 
     @Test
-    fun firstPartialOffsetIsReportedOnce() {
-        now = 1_500
-        assertNull(tracker.onPartial(" "))
-        assertEquals(500L, tracker.onPartial("hi"))
-        now = 1_900
-        assertNull(tracker.onPartial("hi there"))
+    fun stampPrefixesLabelAndOffset() {
+        now = 1_340
+        assertEquals("STT +340ms ready", tracker.stamp("ready"))
     }
 
     @Test
-    fun firstLevelOffsetIsReportedOnce() {
-        now = 2_800
-        assertEquals(1_800L, tracker.onLevel())
-        now = 2_900
-        assertNull(tracker.onLevel())
+    fun eachEventIsFirstOnlyOnce() {
+        assertTrue(tracker.isFirst("partial"))
+        assertFalse(tracker.isFirst("partial"))
+        assertTrue(tracker.isFirst("level"))
     }
 }
