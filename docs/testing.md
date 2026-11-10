@@ -82,13 +82,18 @@ and their POM/module files). Gradle fails the build if a downloaded file doesn't
 (including one served by a compromised repository) is caught. Checksums only; signature verification is off. JitPack is
 declared as exclusive content for the one group that needs it, so it can't serve anything else.
 
-When a dependency or plugin changes, regenerate from `app/`:
+When a dependency or plugin changes, regenerate from `app/` with an empty Gradle cache and no configuration cache:
 
 ```
-./gradlew --write-verification-metadata sha256 testDebugUnitTest ktlintCheck assembleDebug assembleRelease lint
+GRADLE_USER_HOME="$(mktemp -d)" ./gradlew --no-daemon --no-configuration-cache \
+  --write-verification-metadata sha256 ktlintCheck testDebugUnitTest assembleDebug assembleRelease lint
 ```
 
-`lint` is included so its tooling dependencies are covered; it may report lint errors, which is separate from the
+Both matter. Some files (parent POMs and BOMs on the plugin classpath) are only resolved when they aren't cached yet,
+and a reused configuration cache skips plugin-classpath resolution entirely; either way they go unrecorded and CI,
+which starts empty, fails verification on them. Check the result the same way: run
+`GRADLE_USER_HOME="$(mktemp -d)" ./gradlew --no-daemon ktlintCheck testDebugUnitTest assembleDebug` and expect it to
+pass. `lint` is included so its tooling dependencies are covered; it may report lint errors, which is separate from the
 metadata being written. Then review the diff of the metadata file: new entries should match the dependency you
 intended to add or bump, and nothing else (no `<trust>` blanket entries, no unrelated groups). Don't regenerate just
 to make a verification failure go away; a mismatch on an unchanged version is the case the file exists to catch.
