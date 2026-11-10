@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,6 +36,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 // Phone versions of the design system's components (Button, MonoLabel, ChatBubble, status dots).
@@ -165,43 +167,53 @@ fun PulseDot(
     )
 }
 
+/** Draws a solid disc with a halo that swells with the input [level] (0..1), smoothed. */
+@Composable
+private fun LevelOrb(
+    level: Float,
+    size: Dp,
+    core: Float,
+    modifier: Modifier = Modifier,
+) {
+    val color = AppTheme.colors.status
+    val smoothed by animateFloatAsState(level, tween(LEVEL_SMOOTHING_MS), label = "level")
+    Canvas(modifier.size(size)) {
+        val coreRadius = this.size.minDimension / 2 * core // the disc's share of the box; the halo grows into the rest
+        val haloRadius = coreRadius + (this.size.minDimension / 2 - coreRadius) * smoothed
+        drawCircle(color, haloRadius, alpha = HALO_ALPHA)
+        drawCircle(color, coreRadius)
+    }
+}
+
 /**
- * Shows the user they are being heard: a solid disc with a halo that swells with the input [level] (0..1), over a
- * [label]. Large and centred by default; [compact] is a small disc beside the label, to sit under a transcript.
+ * Shows the user they are being heard: a large centred disc with a halo that swells with the input [level] (0..1),
+ * over a [label].
  */
 @Composable
 fun LevelIndicator(
     level: Float,
     label: String,
     modifier: Modifier = Modifier,
-    compact: Boolean = false,
 ) {
-    val color = AppTheme.colors.status
-    val smoothed by animateFloatAsState(level, tween(LEVEL_SMOOTHING_MS), label = "level")
-    val orb = if (compact) 36.dp else 120.dp
-    val core = if (compact) 0.45f else 0.5f // the disc's share of the box; the halo grows into the rest
-    val indicator: @Composable () -> Unit = {
-        Canvas(Modifier.size(orb).semantics { contentDescription = label }) {
-            val coreRadius = size.minDimension / 2 * core
-            val haloRadius = coreRadius + (size.minDimension / 2 - coreRadius) * smoothed
-            drawCircle(color, haloRadius, alpha = HALO_ALPHA)
-            drawCircle(color, coreRadius)
-        }
+    Column(
+        modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        LevelOrb(level, size = 120.dp, core = 0.5f, modifier = Modifier.semantics { contentDescription = label })
+        MonoLabel(label)
     }
-    if (compact) {
-        Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            indicator()
-            MonoLabel(label)
-        }
-    } else {
-        Column(
-            modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            indicator()
-            MonoLabel(label)
-        }
+}
+
+/** The header's pulser while transcribing: a small disc whose halo follows the input [level], in place of [PulseDot]. */
+@Composable
+fun LevelDot(
+    level: Float,
+    modifier: Modifier = Modifier,
+) {
+    // Box matches the 8 dp PulseDot footprint; the halo overflows it, so the row doesn't shift.
+    Box(modifier.size(8.dp), contentAlignment = Alignment.Center) {
+        LevelOrb(level, size = 20.dp, core = 0.4f, modifier = Modifier.requiredSize(20.dp))
     }
 }
 

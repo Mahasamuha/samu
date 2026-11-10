@@ -45,6 +45,7 @@ import com.mahasamuha.assistant.ui.AppType
 import com.mahasamuha.assistant.ui.ChatBubble
 import com.mahasamuha.assistant.ui.GhostButton
 import com.mahasamuha.assistant.ui.Hairline
+import com.mahasamuha.assistant.ui.LevelDot
 import com.mahasamuha.assistant.ui.LevelIndicator
 import com.mahasamuha.assistant.ui.Mark
 import com.mahasamuha.assistant.ui.MonoLabel
@@ -52,6 +53,7 @@ import com.mahasamuha.assistant.ui.PrimaryButton
 import com.mahasamuha.assistant.ui.PulseDot
 import com.mahasamuha.assistant.ui.TypingBubble
 import com.mahasamuha.assistant.voice.PanelState.Phase
+import kotlinx.coroutines.delay
 
 /** Bottom sheet-style panel in the design system's ChatPanel style; tapping outside it closes the session. */
 @Composable
@@ -64,6 +66,16 @@ fun SessionPanel(
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
+    // Listening and words have started arriving.
+    val transcribing = state.phase == Phase.Listening && state.hearing.isNotEmpty()
+    // The warm-up indicator waits a moment, so a warm start (engine up almost at once) never flashes it.
+    var warmupDelayPassed by remember(state.listenId) { mutableStateOf(false) }
+    LaunchedEffect(state.listenId) {
+        delay(WARMUP_INDICATOR_DELAY_MS)
+        warmupDelayPassed = true
+    }
+    val showWarmup = showWarmupIndicator(state, warmupDelayPassed)
+    val heardLive = state.phase == Phase.Listening && state.engineUp && !transcribing
     BoxWithConstraints(
         modifier =
             modifier
@@ -103,23 +115,23 @@ fun SessionPanel(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     // Pulses while the assistant is busy or listening, so a wait never looks like nothing is happening.
-                    PulseDot(
-                        active = state.phase != Phase.Idle,
-                        color = if (state.phase == Phase.Idle) colors.textMuted else colors.status,
-                    )
-                    MonoLabel("samu · ${statusText(state)}", modifier = Modifier.weight(1f))
+                    // While words are arriving the pulser follows the input level instead.
+                    if (transcribing || heardLive) {
+                        LevelDot(level = state.level)
+                    } else {
+                        PulseDot(
+                            active = state.phase != Phase.Idle,
+                            color = if (state.phase == Phase.Idle) colors.textMuted else colors.status,
+                        )
+                    }
+                    MonoLabel("samu · ${statusText(state, transcribing)}", modifier = Modifier.weight(1f))
                     Mark(size = 32.dp)
                 }
                 // Takes the space left under the cap; scrolls once the conversation outgrows it.
                 Transcript(state, onOpenSource, Modifier.weight(1f, fill = false))
-                if (state.phase == Phase.Listening) {
-                    // Big and centred until words arrive; then small under the hearing bubble until listening ends.
-                    val transcribing = state.hearing.isNotEmpty()
-                    LevelIndicator(
-                        level = state.level,
-                        label = if (transcribing) "transcribing" else "listening",
-                        compact = transcribing,
-                    )
+                // Big and centred only while the speech engine is still warming up; then the header takes over.
+                if (showWarmup) {
+                    LevelIndicator(level = state.level, label = "listening")
                 }
                 state.error?.let { error ->
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -306,8 +318,19 @@ private fun ConfirmationCard(
     }
 }
 
-private fun statusText(state: PanelState): String =
+private fun statusText(
+    state: PanelState,
+    transcribing: Boolean,
+): String =
     when {
+        transcribing -> {
+            "transcribing"
+        }
+
+        state.phase == Phase.Listening && state.engineUp && state.confirming == null -> {
+            "listening"
+        }
+
         state.confirming is Confirmation.Ask && state.phase == Phase.Listening -> {
             "say yes or no"
         }
@@ -322,3 +345,12 @@ private fun statusText(state: PanelState): String =
             }
         }
     }
+
+/** How long a listen must have run, with the engine still down, before the centre indicator appears. */
+internal const val WARMUP_INDICATOR_DELAY_MS = 300L
+
+/** The centre indicator: listening, no text yet, engine not up, and [delayPassed] since the listen started. */
+internal fun showWarmupIndicator(
+    state: PanelState,
+    delayPassed: Boolean,
+): Boolean = state.phase == Phase.Listening && state.hearing.isEmpty() && !state.engineUp && delayPassed

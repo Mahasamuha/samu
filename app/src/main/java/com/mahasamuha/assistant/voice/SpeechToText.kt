@@ -31,6 +31,9 @@ sealed interface SttEvent {
     data class Level(
         val value: Float,
     ) : SttEvent
+
+    /** The recognizer is up: its first level callback arrived. Once per listen; collectors that don't care ignore it. */
+    data object EngineUp : SttEvent
 }
 
 class SttException(
@@ -45,16 +48,24 @@ class OnDeviceSttUnavailableException : Exception("On-device speech recognition 
 /**
  * One utterance per [listen]: [SttEvent.Level]s and partial results, then a single [SttEvent.Final], then completion.
  * [expected] are words or phrases to favor (e.g. yes/no while confirming); implementations may ignore it.
+ * [firstInSession] is false once Samu has spoken in this session (replies, follow-ups, confirmations); an
+ * implementation that endpoints itself may wait less for a reply. Implementations may ignore it.
  */
 interface SpeechToText {
-    fun listen(expected: List<String> = emptyList()): Flow<SttEvent>
+    fun listen(
+        expected: List<String> = emptyList(),
+        firstInSession: Boolean = true,
+    ): Flow<SttEvent>
 }
 
 /** The platform's on-device recognizer, with no fallback to the default one. Must be driven from the main thread. */
 class PlatformSpeechToText(
     private val context: Context,
 ) : SpeechToText {
-    override fun listen(expected: List<String>): Flow<SttEvent> =
+    override fun listen(
+        expected: List<String>,
+        firstInSession: Boolean,
+    ): Flow<SttEvent> =
         callbackFlow {
             if (!SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
                 Log.w(TAG, "STT: on-device recognition unavailable")
@@ -84,17 +95,24 @@ class PlatformSpeechToText(
  * flow ends with their join when the session ends; partials show the earlier segments too. The recognizer's own
  * level callbacks are forwarded as [SttEvent.Level] only when not segmented (the piped source measures its own audio).
  * [onEnd] runs just before the flow is closed, for cleanup that must happen as soon as the recognizer is done.
+ * [onText] runs on the first non-blank partial or segment (any thread's worth of care is the caller's).
+ * The first `onRmsChanged` also sends [SttEvent.EngineUp]. [onRms] runs on every `onRmsChanged` (main thread), after the first-level log.
  */
 internal fun ProducerScope<SttEvent>.recognitionListener(
     label: String,
     tracker: ListenTracker,
     segments: SegmentedTranscript? = null,
     onEnd: () -> Unit = {},
+    onText: () -> Unit = {},
+    onRms: (Float) -> Unit = {},
 ): RecognitionListener =
     object : RecognitionListener {
+        private var engineUp = false
+
         override fun onPartialResults(partialResults: Bundle) {
             firstResult(partialResults)?.let {
                 tracker.onPartial(it)?.let { ms -> Log.i(TAG, "$label +${ms}ms first partial") }
+                onText()
                 trySend(SttEvent.Partial(segments?.onPartial(it) ?: it))
             }
         }
@@ -125,6 +143,7 @@ internal fun ProducerScope<SttEvent>.recognitionListener(
             val transcript = segments ?: return
             val text = firstResult(bundle).orEmpty()
             transcript.onSegment(text)
+            if (text.isNotBlank()) onText()
             Log.i(TAG, "$label +${tracker.offsetMs()}ms segment result #${transcript.segmentCount}, ${text.length} chars")
         }
 
@@ -156,7 +175,15 @@ internal fun ProducerScope<SttEvent>.recognitionListener(
         }
 
         override fun onRmsChanged(rmsdB: Float) {
-            tracker.onLevel()?.let { ms -> Log.i(TAG, "$label +${ms}ms first level") }
+            tracker.onLevel()?.let { ms ->
+                val what = if (segments == null) "first level" else "recognizer up (first rms)"
+                Log.i(TAG, "$label +${ms}ms $what")
+            }
+            if (!engineUp) {
+                engineUp = true
+                trySend(SttEvent.EngineUp)
+            }
+            onRms(rmsdB)
             if (segments == null) trySend(SttEvent.Level(InputLevel.fromRecognizerDb(rmsdB)))
         }
 

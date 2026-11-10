@@ -19,7 +19,7 @@ class InputLevelTest {
     @Test
     fun louderIsHigherAndStaysInRange() {
         val quiet = InputLevel.fromPcm(ShortArray(320) { 100 })
-        val speech = InputLevel.fromPcm(ShortArray(320) { 2_000 })
+        val speech = InputLevel.fromPcm(ShortArray(320) { 1_000 })
         assertTrue(quiet in 0f..1f)
         assertTrue(speech > quiet)
         assertTrue(speech < 1f)
@@ -27,8 +27,8 @@ class InputLevelTest {
 
     @Test
     fun midScaleDbMapsToHalf() {
-        // -30 dBFS is halfway between the -50 floor and -10 ceiling: amplitude 32768 * 10^(-30/20).
-        val amplitude = (32_768 * Math.pow(10.0, -30.0 / 20)).toInt().toShort()
+        // -42.5 dBFS is halfway between the -60 floor and -25 ceiling.
+        val amplitude = (32_768 * Math.pow(10.0, -42.5 / 20)).toInt().toShort()
         assertEquals(0.5f, InputLevel.fromPcm(ShortArray(320) { amplitude }), 0.01f)
     }
 
@@ -45,5 +45,18 @@ class InputLevelTest {
         assertEquals(1f, InputLevel.fromRecognizerDb(10f), 0f)
         assertEquals(1f, InputLevel.fromRecognizerDb(20f), 0f)
         assertEquals(0.5f, InputLevel.fromRecognizerDb(4f), 0.001f)
+    }
+
+    @Test
+    fun rmsDbfsOfFullScaleIsZeroAndSilenceIsFloor() {
+        assertEquals(0.0, InputLevel.rmsDbfs(ShortArray(320) { Short.MAX_VALUE }), 0.01)
+        assertEquals(InputLevel.SILENCE_DBFS, InputLevel.rmsDbfs(ShortArray(320)), 0.0)
+    }
+
+    @Test
+    fun rangeEndsMapToZeroAndOne() {
+        assertEquals(0f, InputLevel.fromDbfs(-60.0), 0f)
+        assertEquals(1f, InputLevel.fromDbfs(-25.0), 0f)
+        assertEquals(0f, InputLevel.fromDbfs(-80.0), 0f)
     }
 }
