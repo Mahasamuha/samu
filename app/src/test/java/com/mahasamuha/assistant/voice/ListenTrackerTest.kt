@@ -65,4 +65,12 @@ class ListenTrackerTest {
         now = 1_900
         assertNull(tracker.onPartial("hi there"))
     }
+
+    @Test
+    fun firstLevelOffsetIsReportedOnce() {
+        now = 2_800
+        assertEquals(1_800L, tracker.onLevel())
+        now = 2_900
+        assertNull(tracker.onLevel())
+    }
 }

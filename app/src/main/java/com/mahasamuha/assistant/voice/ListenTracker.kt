@@ -16,6 +16,7 @@ class ListenTracker(
 ) {
     private val startMs = clock()
     private var firstPartialSeen = false
+    private var firstLevelSeen = false
     private var lastPartial: String? = null
 
     fun offsetMs(): Long = clock() - startMs
@@ -26,6 +27,13 @@ class ListenTracker(
         lastPartial = text
         if (firstPartialSeen) return null
         firstPartialSeen = true
+        return offsetMs()
+    }
+
+    /** Returns the offset of the first input-level reading, or null for later ones. */
+    fun onLevel(): Long? {
+        if (firstLevelSeen) return null
+        firstLevelSeen = true
         return offsetMs()
     }
 

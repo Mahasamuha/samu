@@ -29,6 +29,7 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.mahasamuha.assistant.AssistantApp
+import com.mahasamuha.assistant.BuildConfig
 import com.mahasamuha.assistant.ui.AssistantTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -90,7 +91,7 @@ class AssistantSession(
         controller =
             VoiceSessionController(
                 scope = lifecycleScope,
-                stt = PlatformSpeechToText(context),
+                stt = if (BuildConfig.DEBUG && app.sttPreference.pipedAudio) PipedSpeechToText(context) else PlatformSpeechToText(context),
                 chat = app.chatClient,
                 // From the session's own context while the panel is up; Android 17 blocks background launches.
                 // Resolved at the first model request; the index refresh runs while the user speaks.
