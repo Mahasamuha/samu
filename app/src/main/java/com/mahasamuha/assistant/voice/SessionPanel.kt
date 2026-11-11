@@ -45,12 +45,15 @@ import com.mahasamuha.assistant.ui.AppType
 import com.mahasamuha.assistant.ui.ChatBubble
 import com.mahasamuha.assistant.ui.GhostButton
 import com.mahasamuha.assistant.ui.Hairline
+import com.mahasamuha.assistant.ui.LevelDot
+import com.mahasamuha.assistant.ui.LevelIndicator
 import com.mahasamuha.assistant.ui.Mark
 import com.mahasamuha.assistant.ui.MonoLabel
 import com.mahasamuha.assistant.ui.PrimaryButton
 import com.mahasamuha.assistant.ui.PulseDot
 import com.mahasamuha.assistant.ui.TypingBubble
 import com.mahasamuha.assistant.voice.PanelState.Phase
+import kotlinx.coroutines.delay
 
 /** Bottom sheet-style panel in the design system's ChatPanel style; tapping outside it closes the session. */
 @Composable
@@ -63,6 +66,13 @@ fun SessionPanel(
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
+    // The warm-up indicator waits a moment, so a warm start (engine up almost at once) never flashes it.
+    var warmupDelayPassed by remember(state.listenId) { mutableStateOf(false) }
+    LaunchedEffect(state.listenId) {
+        delay(WARMUP_INDICATOR_DELAY_MS)
+        warmupDelayPassed = true
+    }
+    val stage = listenStage(state, warmupDelayPassed)
     BoxWithConstraints(
         modifier =
             modifier
@@ -102,15 +112,24 @@ fun SessionPanel(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     // Pulses while the assistant is busy or listening, so a wait never looks like nothing is happening.
-                    PulseDot(
-                        active = state.phase != Phase.Idle,
-                        color = if (state.phase == Phase.Idle) colors.textMuted else colors.status,
-                    )
-                    MonoLabel("samu · ${statusText(state)}", modifier = Modifier.weight(1f))
+                    // While words are arriving the pulser follows the input level instead.
+                    if (stage == ListenStage.Transcribing || stage == ListenStage.Hearing) {
+                        LevelDot(level = state.level)
+                    } else {
+                        PulseDot(
+                            active = state.phase != Phase.Idle,
+                            color = if (state.phase == Phase.Idle) colors.textMuted else colors.status,
+                        )
+                    }
+                    MonoLabel("samu · ${statusText(state, stage)}", modifier = Modifier.weight(1f))
                     Mark(size = 32.dp)
                 }
                 // Takes the space left under the cap; scrolls once the conversation outgrows it.
                 Transcript(state, onOpenSource, Modifier.weight(1f, fill = false))
+                // Big and centred only while the speech engine is still warming up; then the header takes over.
+                if (stage == ListenStage.Warmup) {
+                    LevelIndicator(level = state.level, label = "listening")
+                }
                 state.error?.let { error ->
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         MonoLabel("couldn't finish")
@@ -296,9 +315,20 @@ private fun ConfirmationCard(
     }
 }
 
-private fun statusText(state: PanelState): String =
+private fun statusText(
+    state: PanelState,
+    stage: ListenStage?,
+): String =
     when {
-        state.confirming is Confirmation.Ask && state.phase == Phase.Listening -> {
+        stage == ListenStage.Transcribing -> {
+            "transcribing"
+        }
+
+        stage == ListenStage.Hearing && state.confirming == null -> {
+            "listening"
+        }
+
+        stage != null && state.confirming is Confirmation.Ask -> {
             "say yes or no"
         }
 
@@ -311,4 +341,35 @@ private fun statusText(state: PanelState): String =
                 Phase.Idle -> "ready"
             }
         }
+    }
+
+/** How long a listen must have run, with the engine still down, before the centre indicator appears. */
+internal const val WARMUP_INDICATOR_DELAY_MS = 300L
+
+/** Where a listen is, from the panel's point of view. */
+internal enum class ListenStage {
+    /** Engine not up, and the warm-up delay has not passed: nothing extra is shown yet. */
+    Waiting,
+
+    /** Engine not up for longer than the delay: the big centre indicator shows. */
+    Warmup,
+
+    /** Engine up, no words yet. */
+    Hearing,
+
+    /** Words are arriving. */
+    Transcribing,
+}
+
+/** The listen stage, or null when not listening. [delayPassed]: [WARMUP_INDICATOR_DELAY_MS] since the listen began. */
+internal fun listenStage(
+    state: PanelState,
+    delayPassed: Boolean,
+): ListenStage? =
+    when {
+        state.phase != Phase.Listening -> null
+        state.hearing.isNotEmpty() -> ListenStage.Transcribing
+        state.engineUp -> ListenStage.Hearing
+        delayPassed -> ListenStage.Warmup
+        else -> ListenStage.Waiting
     }

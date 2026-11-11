@@ -36,7 +36,8 @@ Same phone, pointed at the workstation dev stack (`compose.build.yaml`, built fr
 | MCP stopped, cache present | Pass. The refresh failed (502); the session used `index=cache (1 min old)` with search listed; `web_search` failed as a tool error (the model tried twice); weather fell back to Open-Meteo. Each failed MCP request took 5 s at the gateway before its 502, so a failed search took about 15 s. Cause: the stopped container's name no longer resolves, and Docker's DNS forwarded it upstream with the default 5 s timeout (measured 5.03 s). Fixed with `dns_opt` on the gateway (one 1 s try; measured 1.0 s, live names a few ms). |
 | No cache, MCP stopped (cache file deleted, app force-stopped) | Pass. `index=bundled`: no search listed; weather from Open-Meteo; the failed refresh ran in the background without delaying the session. Asked to search, the model said it couldn't find the information rather than that search is unavailable. |
 
-## Still open
+## Build check (2026-11-01)
 
-- The plan's build check: a local tool in no capability fails the Gradle build.
-- The Pixel 8 install.
+A temporary local tool (`ToolDefinition(name = "orphan_check_tool", …)`) in no capability failed `assembleDebug` at `:bundleCapabilities` with "Local tools in no local or hybrid capability in capabilities/capabilities.json: orphan_check_tool". Pass; the file was removed and the build passed again.
+
+The Pixel 8 runs the build too (v0.3.0 code), against production.

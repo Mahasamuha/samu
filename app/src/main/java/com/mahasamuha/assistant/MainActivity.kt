@@ -67,6 +67,7 @@ class MainActivity : ComponentActivity() {
     private var home by mutableStateOf("")
     private var voices by mutableStateOf<List<VoiceOption>>(emptyList())
     private var voice by mutableStateOf<String?>(null)
+    private var pipedAudio by mutableStateOf(false)
 
     // Plays the samples; the activity is visible, so its own speech is allowed.
     private lateinit var speaker: PlatformSpeaker
@@ -121,6 +122,7 @@ class MainActivity : ComponentActivity() {
         home = app.savedPlaces.home
         work = app.savedPlaces.work
         voice = app.voicePreference.name
+        pipedAudio = app.sttPreference.pipedAudio
         gatewayInput = app.gatewayPreference.url.orEmpty()
         showGatewayInUse()
         speaker = PlatformSpeaker(this)
@@ -167,6 +169,11 @@ class MainActivity : ComponentActivity() {
                     voices = voices,
                     voice = voice,
                     onPickVoice = ::pickVoice,
+                    pipedAudio = pipedAudio,
+                    onPipedAudioChange = {
+                        pipedAudio = it
+                        app.sttPreference.pipedAudio = it
+                    },
                     onOpenAssistantSettings = { open(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) },
                     onSignIn = {
                         runReporting("Sign-in") {
@@ -344,6 +351,8 @@ private fun SetupScreen(
     voices: List<VoiceOption>,
     voice: String?,
     onPickVoice: (String?) -> Unit,
+    pipedAudio: Boolean,
+    onPipedAudioChange: (Boolean) -> Unit,
     onOpenAssistantSettings: () -> Unit,
     onSignIn: () -> Unit,
     onSignOut: () -> Unit,
@@ -571,6 +580,18 @@ private fun SetupScreen(
             }
             VoiceRow(null, "Engine default")
             voices.forEach { VoiceRow(it.name, it.label) }
+            if (BuildConfig.DEBUG) {
+                Hairline()
+                MonoLabel("experiment")
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().clickable { onPipedAudioChange(!pipedAudio) },
+                ) {
+                    StatusDot(pipedAudio)
+                    Text("Experimental: feed recognizer our own audio", style = AppType.body, color = colors.text)
+                }
+            }
             message?.let { Text(it, style = AppType.caption, color = colors.textMuted) }
         }
     }

@@ -38,6 +38,7 @@ import com.mahasamuha.assistant.sms.SendSmsTool
 import com.mahasamuha.assistant.sms.SmsSender
 import com.mahasamuha.assistant.voice.LocationSource
 import com.mahasamuha.assistant.voice.PlatformLocationSource
+import com.mahasamuha.assistant.voice.SttPreference
 import com.mahasamuha.assistant.voice.TAG
 import com.mahasamuha.assistant.voice.VoicePreference
 import com.mahasamuha.assistant.weather.OpenMeteoWeather
@@ -62,6 +63,7 @@ class AssistantApp : Application() {
     val locationSource: LocationSource by lazy { PlatformLocationSource(this) }
     val savedPlaces by lazy { SavedPlaces(this) }
     val voicePreference by lazy { VoicePreference(this) }
+    val sttPreference by lazy { SttPreference(this) }
 
     private val weatherTool by lazy { WeatherTool(OpenMeteoWeather()::forecast, locationSource) }
     private val contacts by lazy { ContactDirectory(contentResolver, resources) }

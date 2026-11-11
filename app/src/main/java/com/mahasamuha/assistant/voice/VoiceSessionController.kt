@@ -41,6 +41,12 @@ data class PanelState(
     val transcript: List<PanelMessage> = emptyList(),
     /** Words recognized so far while the user speaks; moves into [transcript] when they finish. */
     val hearing: String = "",
+    /** Input loudness 0..1 while listening, for the level indicator; 0 otherwise. */
+    val level: Float = 0f,
+    /** Whether the speech engine has come up in the current listen (reset at each listen start). */
+    val engineUp: Boolean = false,
+    /** Counts listens, so the panel can time things from the start of each one. */
+    val listenId: Int = 0,
     val error: String? = null,
     /** An action waiting on the user: shown with Confirm/Cancel (ask) or just Cancel (announce). */
     val confirming: Confirmation? = null,
@@ -110,6 +116,9 @@ class VoiceSessionController(
     // Known from the first turn on.
     private lateinit var tools: ToolRegistry
     private var turn: Job? = null
+
+    // Set once Samu has spoken; listens after that are replies, which the recognizer wait is shorter for.
+    private var hasSpoken = false
 
     // Completed by a Confirm/Cancel tap while an action is being confirmed or announced.
     private var tap: CompletableDeferred<Boolean>? = null
@@ -194,7 +203,7 @@ class VoiceSessionController(
             Log.w(TAG, "Turn failed: $message", e)
             _state.update { it.copy(phase = PanelState.Phase.Idle, hearing = "", error = message) }
             try {
-                speaker.speak(message)
+                speak(message)
             } catch (speakError: Exception) {
                 Log.w(TAG, "Couldn't speak the error", speakError)
             }
@@ -209,11 +218,33 @@ class VoiceSessionController(
         if (!hasMicPermission()) throw UserFacingException("I need microphone access. Open the assistant app to allow it.")
     }
 
-    private suspend fun hear(expected: List<String> = emptyList()): String {
-        _state.update { it.copy(phase = PanelState.Phase.Listening) }
+    private suspend fun hear(
+        expected: List<String> = emptyList(),
+        kind: ListenKind = if (hasSpoken) ListenKind.Reply else ListenKind.First,
+    ): String {
+        _state.update { it.copy(phase = PanelState.Phase.Listening, engineUp = false, listenId = it.listenId + 1) }
+        try {
+            return collectHeard(expected, kind)
+        } finally {
+            _state.update { it.copy(level = 0f) }
+        }
+    }
+
+    private suspend fun collectHeard(
+        expected: List<String>,
+        kind: ListenKind,
+    ): String {
         var final = ""
-        stt.listen(expected).collect { event ->
+        stt.listen(expected, kind).collect { event ->
             when (event) {
+                is SttEvent.Level -> {
+                    _state.update { it.copy(level = event.value) }
+                }
+
+                SttEvent.EngineUp -> {
+                    _state.update { it.copy(engineUp = true) }
+                }
+
                 is SttEvent.Partial -> {
                     _state.update { it.copy(hearing = event.text) }
                 }
@@ -366,7 +397,7 @@ class VoiceSessionController(
     private suspend fun hearConfirmation(): Pair<ConfirmationResult, String?> {
         val reply =
             try {
-                hear(ConfirmationReply.EXPECTED)
+                hear(ConfirmationReply.EXPECTED, ListenKind.Confirmation)
             } catch (e: SttException) {
                 if (!e.noSpeech) throw e
                 ""
@@ -399,7 +430,12 @@ class VoiceSessionController(
 
     private suspend fun speakSentence(sentence: String) {
         _state.update { it.copy(phase = PanelState.Phase.Speaking) }
-        speaker.speak(sentence)
+        speak(sentence)
+    }
+
+    private suspend fun speak(text: String) {
+        hasSpoken = true
+        speaker.speak(text)
     }
 
     private companion object {

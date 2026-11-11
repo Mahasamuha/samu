@@ -1,0 +1,352 @@
+package com.mahasamuha.assistant.voice
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
+import android.os.Bundle
+import android.os.ParcelFileDescriptor
+import android.os.SystemClock
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import com.konovalov.vad.webrtc.VadWebRTC
+import com.konovalov.vad.webrtc.config.FrameSize
+import com.konovalov.vad.webrtc.config.Mode
+import com.konovalov.vad.webrtc.config.SampleRate
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ProducerScope
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.concurrent.atomic.AtomicBoolean
+
+/**
+ * Experiment: we own the microphone and feed the on-device recognizer through `EXTRA_AUDIO_SOURCE`, so audio
+ * captured while a cold recognizer is still starting up waits in the pipe instead of being lost.
+ * The recognizer won't finalise piped audio until the pipe closes, and its callbacks run in processing time while it
+ * catches up, so endpointing is ours: a WebRTC VAD on the audio as recorded feeds an [Endpointer] (audio time),
+ * and an end closes the pipe. The session is segmented, so speech the recognizer split into several segments is
+ * joined. [maxListenMs] closes the pipe regardless.
+ * A cold recognizer seems to discard audio older than a short window while its engine initialises, so until its
+ * first level callback ("recognizer up") the pipe carries paced silence and the real audio waits in the pump's
+ * queue; then the queue is sent from the first frame. The gate opens on that signal or after [GATE_TIMEOUT_MS]
+ * without it. An endpoint does not release it; the recognizer ending, the listen cap, or the flow closing do.
+ * Must be driven from the main thread.
+ */
+class PipedSpeechToText(
+    private val context: Context,
+    private val maxListenMs: Long = MAX_LISTEN_MS,
+) : SpeechToText {
+    @SuppressLint("MissingPermission") // The session checks RECORD_AUDIO before listening.
+    override fun listen(
+        expected: List<String>,
+        kind: ListenKind,
+    ): Flow<SttEvent> =
+        callbackFlow {
+            val tracker = ListenTracker(LABEL, SystemClock::elapsedRealtime)
+            if (!SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
+                tracker.logWarning("on-device recognition unavailable")
+                throw OnDeviceSttUnavailableException()
+            }
+
+            val chunkBytes = VAD_FRAME_SAMPLES * FRAMES_PER_CHUNK * BYTES_PER_SAMPLE
+            val minBytes = AudioRecord.getMinBufferSize(SAMPLE_RATE_HZ, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+            val audioRecord =
+                AudioRecord(
+                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                    SAMPLE_RATE_HZ,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    maxOf(minBytes, chunkBytes * 4),
+                )
+
+            // Everything below this point is torn down by cleanup(), which can run from several places and must be
+            // safe to repeat; the resources it frees are created one by one inside the try further down.
+            val ended = AtomicBoolean(false)
+            val cleanedUp = AtomicBoolean(false)
+            val recordReleased = AtomicBoolean(false)
+            val vadClosed = AtomicBoolean(false)
+            val levelStats = ListenLevelStats()
+            var pump: AudioPump? = null
+            var readSide: ParcelFileDescriptor? = null
+            var writeSide: ParcelFileDescriptor? = null
+            var recognizer: SpeechRecognizer? = null
+            var vad: VadWebRTC? = null
+            var readerLaunched = false
+
+            // An unexpected exception on the io scope fails this listen instead of crashing the process.
+            val io =
+                CoroutineScope(
+                    Dispatchers.IO + SupervisorJob() +
+                        CoroutineExceptionHandler { _, e ->
+                            tracker.logWarning("unexpected failure on the io scope", e)
+                            close(e)
+                        },
+                )
+
+            // Stop after release throws, so both are guarded; the reader's finally and cleanup() may both get here.
+            fun releaseRecord() {
+                if (!recordReleased.compareAndSet(false, true)) return
+                runCatching { audioRecord.stop() }
+                audioRecord.release()
+            }
+
+            // The native VAD must not be closed under a frame being scored, so once the reader has launched it
+            // closes the VAD itself (in its finally, which always runs); cleanup() only does so before that.
+            fun closeVad() {
+                if (!vadClosed.compareAndSet(false, true)) return
+                runCatching { vad?.close() }
+            }
+
+            // Idempotent, any thread. Real audio queued behind a closed gate is released at the end of the listen.
+            fun openGate(reason: String) {
+                val queued = pump?.openGate() ?: return
+                val queuedMs = queued / BYTES_PER_MS
+                tracker.log("gate open ($reason), $queuedMs ms of real audio queued")
+            }
+
+            // Safe from any thread and idempotent. The reader loop notices the flag and releases the AudioRecord.
+            // An endpoint leaves the gate alone: during a long start-up the recognizer discards early audio, so the
+            // queue waits (behind paced silence) for "recognizer up" or the gate timeout. Only ends that mean the
+            // recognizer is done or gone release it at once.
+            fun endCapture(
+                reason: String,
+                releaseGate: Boolean,
+            ) {
+                if (releaseGate) openGate(reason)
+                if (!ended.compareAndSet(false, true)) return
+                pump?.finish()
+                tracker.log("capture ended ($reason)")
+                tracker.log(levelStats.summary())
+            }
+
+            // Idempotent. Runs on the main thread (the recognizer needs it): on a setup failure, when the flow closes,
+            // and when the collector goes away.
+            fun cleanup() {
+                if (!cleanedUp.compareAndSet(false, true)) return
+                endCapture("flow closed", releaseGate = true)
+                io.cancel()
+                // Unblocks a writer stuck on a full pipe if the recognizer walked away. The read side is not closed
+                // after startListening: the intent is parcelled later on the main looper, and a closed descriptor
+                // fails there with "Bad file descriptor" (error 5); it is closed here, when the listen is over.
+                runCatching { writeSide?.close() }
+                runCatching { readSide?.close() }
+                recognizer?.let {
+                    runCatching { it.cancel() }
+                    runCatching { it.destroy() }
+                }
+                releaseRecord()
+                if (!readerLaunched) closeVad()
+            }
+
+            try {
+                if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
+                    throw IllegalStateException("AudioRecord failed to initialise (microphone busy or permission missing)")
+                }
+                val (read, write) = ParcelFileDescriptor.createPipe()
+                readSide = read
+                writeSide = write
+                val audioPump =
+                    AudioPump(
+                        ParcelFileDescriptor.AutoCloseOutputStream(write),
+                        idleChunkBytes = chunkBytes,
+                        pace = { delay(VAD_FRAME_MS.toLong() * FRAMES_PER_CHUNK) },
+                    )
+                pump = audioPump
+
+                val endpointer =
+                    Endpointer(
+                        frameMs = VAD_FRAME_MS,
+                        waitSilenceMs = Endpointer.waitSilenceMs(kind),
+                        endSilenceMs = Endpointer.endSilenceMs(kind),
+                    )
+                val voiceDetector =
+                    VadWebRTC(
+                        // Must match SAMPLE_RATE_HZ and VAD_FRAME_SAMPLES; the library only takes these enums.
+                        sampleRate = SampleRate.SAMPLE_RATE_16K,
+                        frameSize = FrameSize.FRAME_SIZE_320,
+                        mode = Mode.VERY_AGGRESSIVE,
+                        silenceDurationMs = VAD_HANGOVER_MS, // our Endpointer owns the silence rule
+                        speechDurationMs = VAD_SPEECH_MS,
+                    )
+                vad = voiceDetector
+                val speechRecognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+                recognizer = speechRecognizer
+                speechRecognizer.setRecognitionListener(
+                    SegmentedListener(
+                        this,
+                        tracker,
+                        onEnd = { endCapture("recognizer done", releaseGate = true) },
+                        onText = endpointer::onTextHeard,
+                        onRms = {
+                            levelStats.onRecognizerDb(it)
+                            openGate("recognizer up")
+                        },
+                    ),
+                )
+
+                audioRecord.startRecording()
+                tracker.log("audio record started")
+
+                // The writer blocks on the pipe, so it runs apart from the reader: capture never waits on the recognizer.
+                io.launch {
+                    try {
+                        audioPump.run()
+                        tracker.log("${audioPump.realBytesWritten} bytes real, ${audioPump.silenceBytesWritten} bytes silence piped")
+                    } catch (e: IOException) {
+                        tracker.log("pipe closed by the recognizer (${e.message})")
+                    }
+                }
+                readerLaunched = true
+                // ATOMIC: once launched, the body (and its finally) runs even if the scope is cancelled first.
+                io.launch(start = CoroutineStart.ATOMIC) {
+                    val buffer = ByteArray(chunkBytes)
+                    val samples = ShortArray(chunkBytes / BYTES_PER_SAMPLE)
+                    val frame = ShortArray(VAD_FRAME_SAMPLES)
+                    try {
+                        while (isActive && !ended.get()) {
+                            val n = audioRecord.read(buffer, 0, buffer.size)
+                            if (n > 0) {
+                                audioPump.offer(buffer.copyOf(n))
+                                val count = n / BYTES_PER_SAMPLE
+                                ByteBuffer
+                                    .wrap(buffer, 0, n)
+                                    .order(ByteOrder.LITTLE_ENDIAN)
+                                    .asShortBuffer()
+                                    .get(samples, 0, count)
+                                // One level per chunk (~17/s), from the first recorded audio.
+                                val dbfs = InputLevel.rmsDbfs(samples, count)
+                                levelStats.onChunk(dbfs)
+                                trySend(SttEvent.Level(InputLevel.fromDbfs(dbfs)))
+                                tracker.logFirst("own level")
+                                for (start in 0 until count - VAD_FRAME_SAMPLES + 1 step VAD_FRAME_SAMPLES) {
+                                    samples.copyInto(frame, 0, start, start + VAD_FRAME_SAMPLES)
+                                    val reason = endpointer.onFrame(voiceDetector.isSpeech(frame)) ?: continue
+                                    tracker.log(
+                                        "endpoint ($reason) at audio ${endpointer.elapsedMs}ms, " +
+                                            "text heard: ${endpointer.hasHeardText}, listen kind: $kind",
+                                    )
+                                    endCapture("endpoint", releaseGate = false)
+                                    break
+                                }
+                            } else if (n < 0) {
+                                tracker.logWarning("AudioRecord.read returned $n")
+                                break
+                            }
+                        }
+                    } finally {
+                        closeVad()
+                        releaseRecord()
+                        endCapture("capture stopped", releaseGate = false)
+                    }
+                }
+                io.launch {
+                    delay(GATE_TIMEOUT_MS)
+                    openGate("timeout")
+                }
+                io.launch {
+                    delay(maxListenMs)
+                    tracker.logWarning("listen cap of ${maxListenMs}ms fired, closing the pipe")
+                    endCapture("cap", releaseGate = true)
+                    // The recognizer should finish within moments of the pipe closing; if it doesn't, give up.
+                    delay(HARD_DEADLINE_MS)
+                    tracker.logWarning("still not finished ${HARD_DEADLINE_MS}ms after the cap, failing the listen")
+                    runCatching { write.close() }
+                    close(SttException(SpeechRecognizer.ERROR_SPEECH_TIMEOUT))
+                }
+
+                speechRecognizer.startListening(
+                    recognizerIntent(expected)
+                        .putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, RecognizerIntent.EXTRA_AUDIO_SOURCE)
+                        .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, read)
+                        .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
+                        .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
+                        .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE, SAMPLE_RATE_HZ),
+                )
+            } catch (e: Throwable) {
+                cleanup()
+                throw e
+            }
+
+            awaitClose { cleanup() }
+        }
+            // Unbounded: trySend must never drop the final result behind a backlog of level events.
+            .buffer(Channel.UNLIMITED)
+            .flowOn(Dispatchers.Main)
+
+    private companion object {
+        const val LABEL = "STT(piped)"
+        const val SAMPLE_RATE_HZ = 16_000
+        const val BYTES_PER_SAMPLE = 2
+        const val VAD_FRAME_MS = 20
+        const val VAD_FRAME_SAMPLES = SAMPLE_RATE_HZ * VAD_FRAME_MS / 1000 // 320; must match the VadWebRTC enums below
+        const val FRAMES_PER_CHUNK = 3 // 60 ms reads
+        const val VAD_SPEECH_MS = 50
+        const val VAD_HANGOVER_MS = 20
+        const val MAX_LISTEN_MS = 15_000L
+        const val GATE_TIMEOUT_MS = 10_000L
+        const val HARD_DEADLINE_MS = 3_000L
+        const val BYTES_PER_MS = SAMPLE_RATE_HZ * BYTES_PER_SAMPLE / 1000
+    }
+}
+
+/**
+ * Listener for [PipedSpeechToText]: the on-device recognizer runs a segmented session, so results arrive per segment
+ * and the flow ends with their join when the session ends (or with the segments so far plus the unfinished partial
+ * after a no-speech error). Partials show the earlier segments too. The recognizer's own levels are not forwarded
+ * (the piped source measures its own audio); [onRms] gets them instead, along with [onText] on the first
+ * non-blank partial or segment and [onEnd] when the recognizer is done. All run on the main thread.
+ */
+internal class SegmentedListener(
+    events: ProducerScope<SttEvent>,
+    tracker: ListenTracker,
+    private val onText: () -> Unit,
+    onEnd: () -> Unit,
+    private val onRms: (Float) -> Unit,
+) : SttListener(events, tracker, onEnd) {
+    private val transcript = SegmentedTranscript()
+
+    override fun pendingText() = transcript.pendingText()
+
+    override fun onPartialResults(partialResults: Bundle) {
+        firstResult(partialResults)?.let {
+            tracker.logFirst("partial")
+            onText()
+            send(SttEvent.Partial(transcript.onPartial(it)))
+        }
+    }
+
+    // Segmented sessions end in onEndOfSegmentedSession; a plain result is just one more segment.
+    override fun onResults(results: Bundle) = addSegment(results)
+
+    override fun onSegmentResults(segmentResults: Bundle) = addSegment(segmentResults)
+
+    override fun onEndOfSegmentedSession() {
+        tracker.log("end of segmented session, ${transcript.segmentCount} segments")
+        finish(transcript.joined())
+    }
+
+    private fun addSegment(bundle: Bundle) {
+        val text = firstResult(bundle).orEmpty()
+        transcript.onSegment(text)
+        if (text.isNotBlank()) onText()
+        tracker.log("segment result #${transcript.segmentCount}, ${text.length} chars")
+    }
+
+    override fun onRecognizerLevel(rmsdB: Float) = onRms(rmsdB)
+}

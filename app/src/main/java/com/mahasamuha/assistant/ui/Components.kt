@@ -3,17 +3,22 @@ package com.mahasamuha.assistant.ui
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.StartOffset
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,9 +29,14 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 // Phone versions of the design system's components (Button, MonoLabel, ChatBubble, status dots).
@@ -157,6 +167,56 @@ fun PulseDot(
     )
 }
 
+/** Draws a solid disc with a halo that swells with the input [level] (0..1), smoothed. */
+@Composable
+private fun LevelOrb(
+    level: Float,
+    size: Dp,
+    core: Float,
+    modifier: Modifier = Modifier,
+) {
+    val color = AppTheme.colors.status
+    val smoothed by animateFloatAsState(level, tween(LEVEL_SMOOTHING_MS), label = "level")
+    Canvas(modifier.size(size)) {
+        val coreRadius = this.size.minDimension / 2 * core // the disc's share of the box; the halo grows into the rest
+        val haloRadius = coreRadius + (this.size.minDimension / 2 - coreRadius) * smoothed
+        drawCircle(color, haloRadius, alpha = HALO_ALPHA)
+        drawCircle(color, coreRadius)
+    }
+}
+
+/**
+ * Shows the user they are being heard: a large centred disc with a halo that swells with the input [level] (0..1),
+ * over a [label].
+ */
+@Composable
+fun LevelIndicator(
+    level: Float,
+    label: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        LevelOrb(level, size = 120.dp, core = 0.5f, modifier = Modifier.semantics { contentDescription = label })
+        MonoLabel(label)
+    }
+}
+
+/** The header's pulser while transcribing: a small disc whose halo follows the input [level], in place of [PulseDot]. */
+@Composable
+fun LevelDot(
+    level: Float,
+    modifier: Modifier = Modifier,
+) {
+    // Box matches the 8 dp PulseDot footprint; the halo overflows it, so the row doesn't shift.
+    Box(modifier.size(8.dp), contentAlignment = Alignment.Center) {
+        LevelOrb(level, size = 20.dp, core = 0.4f, modifier = Modifier.requiredSize(20.dp))
+    }
+}
+
 /** An assistant bubble with three dots fading in turn: the assistant is working on a reply. */
 @Composable
 fun TypingBubble(modifier: Modifier = Modifier) {
@@ -184,6 +244,8 @@ fun TypingBubble(modifier: Modifier = Modifier) {
 
 // Quiet, slow fades, in keeping with the design system's motion (no spinners).
 private const val PULSE_MS = 600
+private const val LEVEL_SMOOTHING_MS = 90
+private const val HALO_ALPHA = 0.3f
 
 @Composable
 fun Hairline(modifier: Modifier = Modifier) {

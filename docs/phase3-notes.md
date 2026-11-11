@@ -110,6 +110,56 @@ Uncommon contact names (2026-10-22): speech recognition wrote them as more commo
 
 ## Open issues from use (2026-10-24, not yet investigated)
 
-- **First request not heard.** Speech recognition sometimes doesn't register the first request of a session; closing and reopening the assistant is the only way to get it listening.
+- **First request not heard.** Speech recognition sometimes doesn't register the first request of a session; closing and reopening the assistant is the only way to get it listening. **Investigated 2026-11-10: the cause is clipping by a cold recognizer; fixed behind a debug toggle (piped STT). See "Cold-start clipping and piped speech recognition" below.**
+  - Reproduced 2026-11-01 on the Pixel 8 by force-stopping Android System Intelligence (`com.google.android.as`, which serves the on-device recognizer) and invoking straight after. `STT ready` came 340 ms after the session opened and the hearing bubble showed partial text (starting about 1.5 s after speech began), but the listen ended 11 s later in `error 7` (no match) and the turn failed with "I didn't catch that." A warm run straight after was heard normally (transcript about 3.8 s after ready). One run each; repeat before relying on it.
+  - The app drops partials when a listen ends in an error (`PlatformSpeechToText`), and creates and destroys a recognizer per listen. The `#cancel received for a listener which has not started a session` warnings come from `awaitClose` cancelling after a result; harmless.
+  - Candidate fixes: log `onBeginningOfSpeech`, `onEndOfSpeech` and the first partial's time, to measure the lag and the cold failure; on `error 7` after partials, use the last partial as the transcript; reuse one recognizer per session (or keep one warm) and measure whether it helps.
+  - Transcription generally lags speech noticeably (partials trail by a second or more).
+- **Investigate our own recognizer: what would it cost?** (Parked 2026-11-10: piped audio fixed the cold start while keeping Google's model. The on-device comparison of sherpa-onnx and Moonshine is summarised in the section below, in case piped mode fails in daily use.) The platform recognizer's cold-start failures and lag are outside our control. STT already sits behind the `SpeechToText` interface, so a replacement is a swap, not a redesign. To find out per option: on-device streaming models (e.g. sherpa-onnx with a streaming Zipformer, whisper.cpp, Vosk), a self-hosted model on the home server reached through the gateway, and a hosted STT API. For each: time to first partial and to final on the Pixel 8, accuracy (including uncommon contact names), APK size or model download, RAM, battery and heat, streaming support, money per minute for hosted options, and privacy (audio leaving the phone conflicts with the plan's no-record intent unless it is transient). Capturing audio ourselves (`AudioRecord`) happens only while the session is visible, so the background-audio restriction (plan §3) shouldn't apply; verify.
 - **"Play some music" is incoherent.** An unqualified request plays truly random tracks with no genre or thread, rather than picking something and staying with it.
 - **Sonos Move playback.** Asked to play on the Sonos Move, it seemed to target a group coordinator although the Move is a single speaker: the Move looked half-selected but nothing played until it was tapped in the app's cast options and play was pressed manually.
+
+## Suggestions from review and testing (2026-11-01, not scheduled)
+
+Raised during the phase 3.5 review and on-device checks; tracked here so they aren't lost. None is a correctness problem today.
+
+- **Speech recognition, order of work.** (Done or superseded 2026-11-10; see the cold-start section below.) Log the speech events first (cheap, and makes the rest measurable), then fall back to the last partial on `error 7`, then try reusing one recognizer and measure. For our own recognizer, start the cost check with sherpa-onnx and a streaming Zipformer model: it streams partials, runs on-device, and is permissively licensed. That's a starting point to test, not a verdict.
+- **Gateway URL setting: check the server on save (will do).** Today a URL whose host doesn't resolve is saved without complaint, and the refresh then fails as a bare "Capability index refresh failed" (Android's `Log` drops the stack trace for unknown-host errors, so the cause isn't visible). Plan:
+  - Saving calls `GET /healthz` on the new URL (unauthenticated, already on the allowlist) and saves only if it answers.
+  - `/healthz` also returns the oldest app version the server supports (e.g. `{"status":"ok","version":"0.3.0","minAppVersion":"0.3.0"}`); the app refuses a server that needs a newer app and says so.
+  - Name the failure on the setup screen: host not found, can't connect, not a Samu gateway, app too old.
+  - To decide when building: the field name; where the minimum comes from (a constant in the gateway bumped deliberately on breaking changes, or env); how dev builds (`0.2.0-3-g…`) compare (by the release part); whether the app also checks at panel open, not only on save. Record the choice in the plan's decisions table, since it extends the `/healthz` response.
+- **Failed remote calls get retried by the model.** With the MCP server down, the model called `web_search` twice in a row. A transport failure (502, unreachable) could say "unavailable right now, don't retry" in the tool error.
+- **Navigation without Waze.** Waze is the default; on a phone without it the tool fails and the model retries with Google Maps, and the handled error is logged with a full stack trace. Options: default to whichever maps app is installed, and log it without the trace.
+- **Actions dropped when the panel closes leave no log line.** The coroutine's cancellation skips the tool's outcome log, which made one session unreadable in testing. A single "cancelled (session closed)" line would fix it.
+- **Verify `dns_opt` on the home server.** `docker compose exec gateway cat /etc/resolv.conf` should show `timeout:1 attempts:1 edns0`.
+- **Decided against:** telling the model in the prompt when a server capability is unreachable (the "can't find that information" answer when search is missing was judged acceptable).
+
+## Cold-start clipping and piped speech recognition (2026-11-10)
+
+### What was wrong
+
+Measured on the Pixel 8 with Android System Intelligence force-stopped before each run (the service process restarts at once, but its speech engine, SODA, loads only on the next recognition). Logs now give every listen event as milliseconds since listening started.
+
+- `onReadyForSpeech` fires when the microphone opens (about 0.5 s in), not when the engine processes audio. On a cold start the engine took 1.6 to 7.4 s to load (`Initializing SODA` → `start detection`); speech in that gap was lost. The Pixel 6a, measured once, did not reproduce it.
+- `onRmsChanged` is no better as a readiness signal from the platform recognizer: its first reading came about 1.3 s before the engine started processing.
+- The error-7 failure seen on 2026-11-01 is a second symptom: partials, then no match. The app now uses the last partial as the transcript in that case.
+
+### The fix: we own the microphone
+
+`PipedSpeechToText` (debug toggle "Experimental: feed recognizer our own audio" on the setup screen; `PlatformSpeechToText` stays the default):
+
+- Records with `AudioRecord` (`VOICE_RECOGNITION`, 16 kHz mono PCM16) from the start of each listen and feeds Google's on-device recognizer through `RecognizerIntent.EXTRA_AUDIO_SOURCE` (a pipe). The recognizer honours it (`Create input stream from external audio PFD`; it opens no microphone of its own).
+- **The engine discards audio it reads while loading.** With a 7.4 s load, 8 s of piped audio produced empty results; with 5.7 s only the end of a long utterance survived; with 1.6 s everything was kept. So real audio is held back: until the recognizer's first `onRmsChanged` (about 125 ms after the engine starts processing, every run), we write paced silence and queue the real audio, then deliver the queue from its first frame. Fallback after 10 s. Confirmed: a 5.35 s cold start kept the opening words.
+- **With piped audio the recognizer never ends the session on its own**; it keeps per-utterance results until the pipe closes. The session is segmented (`EXTRA_SEGMENTED_SESSION`), segments are joined, and we decide when to close the pipe, in audio time (the recognizer's callbacks run in processing time while it catches up on a backlog). A WebRTC voice activity detector ([gkonovalov/android-vad](https://github.com/gkonovalov/android-vad), MIT, about 0.6 MB of native libraries for four ABIs) classifies 20 ms frames. Rule: once the recognizer has produced text, 0.8 s of silence ends the listen; before that, only 4 s of silence on a reply listen (6 s on a session's first listen) ends it. Desk thumps and Samu's own tail are flagged as speech by the detector, so they never arm the 0.8 s rule; they only reset the wait. A 15 s cap is the backstop. If the endpoint comes while the engine is still loading, the queue still waits for it.
+- **Feedback:** a large level-driven indicator in the middle of the panel, shown only while the engine is warming (not up 300 ms into the listen); otherwise the header shows "samu · listening" or "samu · transcribing" with a level dot. Levels on the Pixel 8: speech peaks about −22 to −33 dBFS, typical −37 to −49; the indicator maps −60..−25 dBFS.
+- Speech before `onShow` (talking during the gesture) is still lost; nothing runs before the session starts. Recording starts about 200 ms after the session is created; starting it in `onCreate` might gain that, unverified.
+
+To watch in daily use before making it the default: cut-offs mid-sentence (0.8 s), noisy places (car, outdoors), yes/no confirmations, and continuous noise that never becomes text (runs to the 15 s cap). If it holds, make piped the default and record the decision in the plan.
+
+### Alternatives considered
+
+- **ML Kit GenAI Speech Recognition** (Google's on-device model with documented file-descriptor input): rejected, alpha (`1.0.0-alpha1`).
+- **Loading Google's engine library directly** (as [gasr](https://github.com/biemster/gasr) does with Chrome's `libsoda`): rejected; proprietary, guarded by an API key and caller checks, and on Android it lives inside another app's process.
+- **Our own on-device recognizer**, if piped mode fails. sherpa-onnx (Apache-2.0, streaming Zipformer about 70 MB int8, LibriSpeech-trained models score 3.05 / 7.69 % WER on LibriSpeech clean/other, hotword biasing that could take contact names) vs Moonshine v2 streaming (MIT, 300K hours of training data, Small 7.84 % Open ASR average, no biasing, no phone benchmarks). Google's on-device model has no public WER; expected to be better on short commands and names because of training data matched to voice queries and built-in contextual biasing, but names already fail with it (above). Decide with a benchmark of real requests on the Pixel 8, not public numbers.
+
